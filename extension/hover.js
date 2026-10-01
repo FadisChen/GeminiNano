@@ -1,7 +1,7 @@
 // 未啟用「翻譯此頁」時，滑鼠停在文字區塊上就彈出該區塊的譯文，補足全頁翻譯遺漏的區塊
 (() => {
   const N = window.__nano;
-  const SKIP = 'script,style,noscript,pre,code,textarea,select,input,svg,math,[translate="no"],[data-nano-tools],.nt-run,.ytp-caption-window-container,.nt-yt';
+  const SKIP = 'script,style,noscript,pre,code,textarea,select,input,svg,math,[translate="no"],[data-nano-tools],.nt-run,.ytp-caption-window-container';
   const DWELL = 350, MAX_CHARS = 3000;
   const cache = new Map();
   let enabled = false, timer = 0, token = 0, shown = null, ctrl = null, pool = null;

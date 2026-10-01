@@ -1,7 +1,7 @@
 ﻿(() => {
   if (window.__nt) return;
   const N = window.__nano;
-  const SKIP = 'script,style,noscript,pre,code,textarea,select,input,svg,math,[translate="no"],[data-nano-tools],.nt-run,.ytp-caption-window-container,.nt-yt';
+  const SKIP = 'script,style,noscript,pre,code,textarea,select,input,svg,math,[translate="no"],[data-nano-tools],.nt-run,.ytp-caption-window-container';
   let current = null, summaryJob = null, keepOriginal = true, settingRevision = 0;
   const owned = new Set();
   const styles = N.el('style');
@@ -200,7 +200,7 @@
     let node;
     while ((node = walker.nextNode())) {
       const parent = node.parentElement;
-      if (!parent || parent.closest('nav,footer,aside,script,style,noscript,pre,code,textarea,select,[data-nano-tools],.nt-translated,.nt-yt,.ytp-caption-window-container') || parent.isContentEditable) continue;
+      if (!parent || parent.closest('nav,footer,aside,script,style,noscript,pre,code,textarea,select,[data-nano-tools],.nt-translated,.ytp-caption-window-container') || parent.isContentEditable) continue;
       const visible = parent.closest('.nt-run') || parent;
       if (!visible.getClientRects().length || getComputedStyle(visible).visibility === 'hidden') continue;
       const block = parent.closest('p,li,h1,h2,h3,h4,h5,h6,blockquote,td,th,div,section,article,main') || root;

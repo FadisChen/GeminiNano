@@ -1,4 +1,4 @@
-// Shared by the page translator and YouTube captions in the isolated world.
+// Shared by the page translator and hover translation in the isolated world.
 (() => {
   if (globalThis.__nano) return;
   const abortError = () => new DOMException('工作已取消', 'AbortError');
@@ -38,7 +38,7 @@
       header{display:flex;align-items:center;justify-content:space-between;gap:8px;padding:12px 16px;border-bottom:1px solid var(--line)}
       h2{font:600 16px/1.5 'Microsoft JhengHei',sans-serif;margin:0}.body{padding:12px 18px;overflow:auto;overflow-wrap:anywhere}.body p{margin:0 0 10px}.body ul,.body ol{padding-left:1.3em;margin:0 0 10px}.body li{margin:5px 0}
       footer{padding:10px 16px;border-top:1px solid var(--line);display:flex;gap:8px;align-items:center;flex-wrap:wrap}.notice{font-size:12px;color:var(--muted)}
-      .tip{position:absolute;max-width:min(420px,calc(100vw - 24px));max-height:40vh;overflow:auto;background:#193d30aa;color:#fff;padding:10px 14px;border-radius:9px;font:14px/1.6 'Microsoft JhengHei',sans-serif;white-space:pre-wrap;pointer-events:none;overflow-wrap:anywhere}
+      .tip{position:absolute;max-width:min(420px,calc(100vw - 24px));max-height:40vh;overflow:auto;background:#193d30;color:#fff;padding:10px 14px;border-radius:9px;font:14px/1.6 'Microsoft JhengHei',sans-serif;white-space:pre-wrap;pointer-events:none;overflow-wrap:anywhere}
       @media(prefers-color-scheme:dark){:host{--bg:#202925;--ink:#ebeee7;--muted:#acb8ae;--line:#435048;--accent:#97c8ac;--soft:#303f36}}
       @media(max-width:420px){.dock,.summary{right:8px;max-width:calc(100vw - 16px)}.dock{bottom:8px}.summary{top:8px}}
     `;
@@ -71,7 +71,7 @@
       const message = el('div', text);
       message.setAttribute('role', 'status');
       message.setAttribute('aria-live', 'polite');
-      card.replaceChildren(el('div', key === 'captions' ? 'YOUTUBE · 雙語字幕' : 'NANO · 本機處理', 'label'), message);
+      card.replaceChildren(el('div', 'NANO · 本機處理', 'label'), message);
       if (actions.length) {
         const row = el('div', '', 'actions');
         for (const [label, action] of actions) { const button = el('button', label); button.addEventListener('click', action); row.append(button); }
