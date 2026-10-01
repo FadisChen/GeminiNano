@@ -9,7 +9,7 @@ const N = globalThis.__nano;
 
 test('detect: English, Japanese and Chinese', () => {
   assert.equal(N.detect('Hello world, this is a test.'), 'en');
-  assert.equal(N.detect('これは日本語の文章です'), 'ja');
+  assert.equal(N.detect('これは日本語の文章です'), null);
   assert.equal(N.detect('這是一段繁體中文'), null);
   assert.equal(N.detect('12345 !!!'), null);
 });
@@ -17,13 +17,13 @@ test('detect: English, Japanese and Chinese', () => {
 test('detect: honours lang hints', () => {
   const el = lang => ({ closest: () => ({ lang }) });
   assert.equal(N.detect('Bonjour le monde', el('fr')), null);
-  assert.equal(N.detect('漢字だけの文章', el('ja')), 'ja');
+  assert.equal(N.detect('Hello world', el('ja')), null);
   assert.equal(N.detect('Hello world', el('zh-TW')), null);
 });
 
 test('confirmLanguage: rejects other Latin-script languages via LanguageDetector', async () => {
   const text = 'Bonjour tout le monde, ceci est une phrase en français.';
-  assert.equal(await N.confirmLanguage(text, 'ja'), true);
+  assert.equal(await N.confirmLanguage(text, 'zh'), true);
   assert.equal(await N.confirmLanguage('Short text', 'en'), true);
   globalThis.LanguageDetector = {
     availability: async () => 'available',

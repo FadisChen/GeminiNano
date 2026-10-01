@@ -1,11 +1,11 @@
 # Nano翻譯官
 
-使用 Chrome 內建的 Translator / Summarizer / LanguageDetector API（Gemini Nano，全程在本機執行），閱讀英文、日文網頁並翻成繁體中文。僅針對 Windows 版 Chrome 設計。
+使用 Chrome 內建的 Translator / Summarizer / LanguageDetector API（Gemini Nano，全程在本機執行），閱讀英文網頁並翻成繁體中文。僅針對 Windows 版 Chrome 設計。
 
 ## 功能
 - **翻譯此頁**：以「文字區塊」為單位（連結、粗體等行內元素合併成同一句）做雙語對照或只看譯文；捲動到才翻譯，支援動態頁面與 iframe。
 - **滑鼠停留翻譯**：未翻譯整頁時，指向文字區塊即彈出譯文。
-- **自動翻譯新頁面**：載入英文、日文頁面時自動啟動。
+- **自動翻譯新頁面**：載入英文頁面時自動啟動。
 - **重點摘要**：長文會分段摘要後再整合；可複製結果。
 
 ## 安裝

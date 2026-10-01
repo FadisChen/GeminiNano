@@ -330,8 +330,8 @@
       const paragraphs = pageParagraphs();
       const text = paragraphs.join('\n\n');
       if (text.length < 80) throw new Error('這個頁面的文字太少，無法產生摘要。');
-      const source = N.detect(text.slice(0, 1200)) || (/[一-鿿]/u.test(text) ? 'zh' : null);
-      if (!source) throw new Error('目前摘要支援英文及日文文章。');
+      const source = 'en';
+      if (!N.detect(text.slice(0, 1200))) throw new Error('目前摘要僅支援英文文章。');
       // Use a neutral supported context; a localized page title may not be supported.
       const context = 'Summarize the main points of this article.';
       const base = { type: 'key-points', format: 'markdown', length: 'medium', expectedInputLanguages: [source], expectedContextLanguages: ['en'] };
@@ -339,7 +339,6 @@
       const available = await N.availability('Summarizer', direct);
       N.check(signal);
       const viaTranslator = available === 'unavailable';
-      if (viaTranslator && source === 'zh') throw new Error('此環境尚不支援中文文章摘要。');
       const options = viaTranslator ? { ...base, outputLanguage: source } : direct;
       status('正在準備摘要模型…');
       model = await N.createModel('Summarizer', options, signal, '文章摘要');

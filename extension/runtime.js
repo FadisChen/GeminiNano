@@ -11,9 +11,7 @@
   };
   function detect(text, element) {
     const hint = element?.closest('[lang]')?.lang?.toLowerCase();
-    if (hint?.startsWith('zh') && !/[぀-ヿ]/u.test(text)) return null;
-    if (/[぀-ヿ]/u.test(text) || (hint?.startsWith('ja') && /[一-鿿]/u.test(text))) return 'ja';
-    if (hint && !/^(en|ja)(-|$)/.test(hint)) return null;
+    if (hint && !/^en(-|$)/.test(hint)) return null;
     const letters = text.match(/\p{L}/gu) || [];
     return letters.length >= 3 && (text.match(/[a-z]/gi) || []).length / letters.length > .8 ? 'en' : null;
   }
@@ -166,7 +164,7 @@
       if (!pending.has(source)) {
         pending.set(source, (async () => {
           try {
-            const model = await createModel('Translator', { sourceLanguage: source, targetLanguage: 'zh-Hant' }, signal, `${source === 'ja' ? '日文' : '英文'} → 繁中`);
+            const model = await createModel('Translator', { sourceLanguage: source, targetLanguage: 'zh-Hant' }, signal, '英文 → 繁中');
             if (signal.aborted) { model.destroy(); throw abortError(); }
             models.add(model);
             return model;

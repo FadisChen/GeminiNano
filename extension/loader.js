@@ -79,9 +79,9 @@
   function autoTranslate() {
     // 子框架只在尺寸夠大且環境支援翻譯時處理，避免廣告／追蹤用的小 iframe。
     if (N.isTinyFrame() || (window !== window.top && !globalThis.Translator)) return;
-    // 頁面有標示語言且不是英文/日文就略過；沒標示的交給段落層級的語言判斷
+    // 頁面有標示語言且不是英文就略過；沒標示的交給段落層級的語言判斷
     const lang = document.documentElement.lang.toLowerCase();
-    if (lang && !/^(en|ja)\b/.test(lang)) return;
+    if (lang && !/^en\b/.test(lang)) return;
     return chrome.runtime.sendMessage({ type: 'auto-translate' });
   }
 
