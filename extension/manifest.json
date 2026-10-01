@@ -1,0 +1,21 @@
+{
+  "manifest_version": 3,
+  "name": "Nano翻譯官",
+  "version": "0.2.0",
+  "description": "使用 Chrome 內建 Gemini Nano 在本機把英文、日文網頁翻成繁體中文，可選擇是否保留原文。",
+  "icons": {
+    "16": "icons/icon-16.png",
+    "32": "icons/icon-32.png",
+    "48": "icons/icon-48.png",
+    "128": "icons/icon-128.png"
+  },
+  "action": {
+    "default_title": "Nano翻譯官",
+    "default_popup": "popup.html",
+    "default_icon": {
+      "16": "icons/icon-16.png",
+      "32": "icons/icon-32.png"
+    }
+  },
+  "permissions": ["activeTab", "scripting", "storage"]
+}
