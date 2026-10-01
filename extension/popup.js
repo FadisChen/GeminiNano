@@ -12,9 +12,16 @@ function buttons() {
   toggleBtn.disabled = !ready || submitting || (!toggleBtn.dataset.on && !available(capabilities?.translation));
   summaryBtn.disabled = !ready || submitting || !available(capabilities?.summary);
 }
-async function call(command) {
-  const results = await chrome.scripting.executeScript({ target: { tabId }, func: cmd => window.__nt[cmd](), args: [command] });
-  return results[0].result;
+// all=true 會對所有 frame 執行（全頁翻譯涵蓋 iframe）；回傳主框架的結果。
+async function call(command, all = false) {
+  const target = all ? { tabId, allFrames: true } : { tabId, frameIds: [0] };
+  const results = await chrome.scripting.executeScript({ target, func: cmd => window.__nt?.[cmd]?.(), args: [command] });
+  return (results.find(result => result.frameId === 0) || results[0])?.result;
+}
+async function inject() {
+  const files = ['runtime.js', 'content.js'];
+  try { await chrome.scripting.executeScript({ target: { tabId, allFrames: true }, files }); }
+  catch { await chrome.scripting.executeScript({ target: { tabId }, files }); }
 }
 async function init() {
   try {
@@ -26,7 +33,7 @@ async function init() {
     const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
     if (!tab?.id) throw new Error('找不到目前分頁。');
     tabId = tab.id;
-    await chrome.scripting.executeScript({ target: { tabId }, files: ['runtime.js', 'content.js'] });
+    await inject();
     const state = await call('getStatus');
     document.getElementById('toggleLabel').textContent = state.on ? '還原此頁' : '翻譯此頁';
     toggleBtn.dataset.on = state.on ? 'true' : '';
@@ -56,7 +63,11 @@ for (const [control, key] of [[hover, 'hoverTranslate'], [auto, 'autoTranslate']
 for (const [button, command] of [[toggleBtn, 'toggle'], [summaryBtn, 'summarize']]) button.addEventListener('click', async () => {
   if (!ready || submitting) return;
   submitting = true; buttons();
-  try { await call(command); window.close(); }
+  try {
+    if (command === 'toggle') await call(toggleBtn.dataset.on ? 'stop' : 'start', true);
+    else await call(command);
+    window.close();
+  }
   catch (error) { showError(`執行失敗：${error.message}`); }
   finally { submitting = false; buttons(); }
 });

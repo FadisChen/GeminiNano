@@ -36,7 +36,7 @@
       .actions{display:flex;gap:8px;margin-top:9px;flex-wrap:wrap}.label{font-size:11px;letter-spacing:.12em;color:var(--muted);margin-bottom:5px}
       .summary{position:absolute;right:16px;top:16px;width:380px;max-width:calc(100vw - 32px);max-height:calc(55vh - 40px);display:flex;flex-direction:column;padding:0}
       header{display:flex;align-items:center;justify-content:space-between;gap:8px;padding:12px 16px;border-bottom:1px solid var(--line)}
-      h2{font:600 16px/1.5 'Microsoft JhengHei',sans-serif;margin:0}.body{padding:12px 18px;overflow:auto;overflow-wrap:anywhere}.body p{margin:0 0 10px}.body ul,.body ol{padding-left:1.3em;margin:0 0 10px}.body li{margin:5px 0}
+      h2{font:600 16px/1.5 'Microsoft JhengHei',sans-serif;margin:0}.body{padding:12px 18px;overflow:auto;overflow-wrap:anywhere}.body p{margin:0 0 10px}.body ul,.body ol{padding-left:1.3em;margin:0 0 10px}.body ul ul,.body ol ol,.body ul ol,.body ol ul{margin:0}.body h3{font:600 14px/1.6 'Microsoft JhengHei',sans-serif;margin:0 0 6px}.body code{font-family:Consolas,monospace;font-size:.92em}.body li{margin:5px 0}
       footer{padding:10px 16px;border-top:1px solid var(--line);display:flex;gap:8px;align-items:center;flex-wrap:wrap}.notice{font-size:12px;color:var(--muted)}
       .tip{position:absolute;max-width:min(420px,calc(100vw - 24px));max-height:40vh;overflow:auto;background:#193d30;color:#fff;padding:10px 14px;border-radius:9px;font:14px/1.6 'Microsoft JhengHei',sans-serif;white-space:pre-wrap;pointer-events:none;overflow-wrap:anywhere}
       @media(prefers-color-scheme:dark){:host{--bg:#202925;--ink:#ebeee7;--muted:#acb8ae;--line:#435048;--accent:#97c8ac;--soft:#303f36}}
@@ -176,5 +176,130 @@
       return pending.get(source);
     };
   }
-  globalThis.__nano = { el, detect, check, abortError, ui, availability, createModel, translatorPool, withAbort };
+  // ---- DOM helpers shared by page translation and hover translation ----
+  const SKIP = 'script,style,noscript,textarea,select,input,svg,math,pre,[translate="no"],[data-nano-tools],.nt-translated,.ytp-caption-window-container,[contenteditable]:not([contenteditable="false"])';
+  const SKIP_BLOCK = `${SKIP},code`;
+  const isTinyFrame = () => window !== window.top && (innerWidth < 240 || innerHeight < 160);
+  function isInline(element, memo) {
+    let value = memo?.get(element);
+    if (value === undefined) {
+      value = /^(inline|contents|ruby)/.test(getComputedStyle(element).display);
+      memo?.set(element, value);
+    }
+    return value;
+  }
+  // Nearest ancestor (or self) that starts its own text block; falls back to <body>.
+  function blockOf(element, memo) {
+    while (element && element !== document.body && element !== document.documentElement && isInline(element, memo)) element = element.parentElement;
+    return !element || element === document.documentElement ? document.body : element;
+  }
+
+  // ---- Translation cache (LRU) and long-text handling ----
+  const cache = new Map(), CACHE_MAX = 800;
+  const cacheGet = key => {
+    if (!cache.has(key)) return undefined;
+    const value = cache.get(key);
+    cache.delete(key); cache.set(key, value);
+    return value;
+  };
+  const cacheSet = (key, value) => {
+    cache.set(key, value);
+    if (cache.size > CACHE_MAX) cache.delete(cache.keys().next().value);
+  };
+  function splitText(text, max) {
+    if (text.length <= max) return [text];
+    const parts = [];
+    let current = '';
+    for (const sentence of text.match(/[^.!?。！？]*[.!?。！？]+\s*|[^.!?。！？]+$/g) || [text]) {
+      if (current && current.length + sentence.length > max) { parts.push(current); current = ''; }
+      if (sentence.length > max) { for (let i = 0; i < sentence.length; i += max) parts.push(sentence.slice(i, i + max)); continue; }
+      current += sentence;
+    }
+    if (current) parts.push(current);
+    return parts;
+  }
+  async function translateText(model, lang, text, signal) {
+    const key = `${lang}\n${text}`;
+    const hit = cacheGet(key);
+    if (hit !== undefined) return hit;
+    let output = '';
+    for (const part of splitText(text, 1500)) { check(signal); output += await model.translate(part.trim(), { signal }); }
+    cacheSet(key, output);
+    return output;
+  }
+
+  // Heuristic detection cannot tell English from other Latin-script languages, so
+  // double-check longer English candidates with the on-device LanguageDetector.
+  let detectorPromise;
+  const languageDetector = () => detectorPromise ??= (async () => {
+    if (!globalThis.LanguageDetector) return null;
+    try { return await LanguageDetector.availability() === 'available' ? await LanguageDetector.create() : null; }
+    catch { return null; }
+  })();
+  async function confirmLanguage(text, lang, element) {
+    if (lang !== 'en' || text.length < 24) return true;
+    if (element?.closest?.('[lang]')?.lang?.toLowerCase().startsWith('en')) return true;
+    const detector = await languageDetector();
+    if (!detector) return true;
+    try {
+      const [top] = await detector.detect(text.slice(0, 500));
+      return !(top && top.detectedLanguage !== 'en' && top.confidence > .7);
+    } catch { return true; }
+  }
+
+  // ---- Summary helpers ----
+  // Greedily pack paragraphs into chunks of at most `budget` characters.
+  function packParagraphs(paragraphs, budget) {
+    const chunks = [];
+    let current = '';
+    const flush = () => { if (current) chunks.push(current); current = ''; };
+    for (const paragraph of paragraphs) {
+      for (const piece of splitText(paragraph, budget)) {
+        if (current && current.length + piece.length + 2 > budget) flush();
+        current += current ? `\n\n${piece}` : piece;
+      }
+    }
+    flush();
+    return chunks;
+  }
+  function parseInline(text) {
+    const parts = [];
+    let last = 0;
+    for (const match of text.matchAll(/\*\*(.+?)\*\*|`([^`]+)`|\*([^*\s][^*]*?)\*/g)) {
+      if (match.index > last) parts.push({ t: 'text', v: text.slice(last, match.index) });
+      parts.push(match[1] !== undefined ? { t: 'b', v: match[1] } : match[2] !== undefined ? { t: 'code', v: match[2] } : { t: 'i', v: match[3] });
+      last = match.index + match[0].length;
+    }
+    if (last < text.length) parts.push({ t: 'text', v: text.slice(last) });
+    return parts;
+  }
+  // Minimal Markdown (headings, nested lists, bold/italic/code) into a plain data tree.
+  function parseMarkdown(text) {
+    const blocks = [], stack = [];
+    const open = (ordered, indent) => {
+      const list = { type: 'list', ordered, items: [] };
+      const parent = stack.at(-1);
+      if (parent) parent.list.items.at(-1).children.push(list); else blocks.push(list);
+      stack.push({ indent, list });
+    };
+    for (const raw of text.split('\n')) {
+      if (!raw.trim()) continue;
+      const item = raw.match(/^([ \t]*)([-*•]|\d+[.)])\s+(.*)$/);
+      if (item) {
+        const indent = item[1].replace(/\t/g, '    ').length, ordered = /\d/.test(item[2]);
+        while (stack.length && indent < stack.at(-1).indent) stack.pop();
+        const top = stack.at(-1);
+        if (!top || indent > top.indent) open(ordered, indent);
+        else if (top.list.ordered !== ordered) { stack.pop(); open(ordered, indent); }
+        stack.at(-1).list.items.push({ inline: parseInline(item[3]), children: [] });
+        continue;
+      }
+      stack.length = 0;
+      const heading = raw.trim().match(/^#{1,6}\s+(.*)$/);
+      blocks.push({ type: heading ? 'h' : 'p', inline: parseInline(heading ? heading[1] : raw.trim()) });
+    }
+    return blocks;
+  }
+
+  globalThis.__nano = { el, detect, check, abortError, ui, availability, createModel, translatorPool, withAbort, SKIP, SKIP_BLOCK, isTinyFrame, isInline, blockOf, splitText, translateText, confirmLanguage, packParagraphs, parseMarkdown };
 })();
