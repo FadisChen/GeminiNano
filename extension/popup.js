@@ -3,6 +3,7 @@ const toggleLabel = document.getElementById('toggleLabel');
 const summaryBtn = document.getElementById('summary');
 const keep = document.getElementById('keep');
 const auto = document.getElementById('auto');
+const yt = document.getElementById('yt');
 const keepHint = document.getElementById('keepHint');
 const msg = document.getElementById('msg');
 
@@ -22,9 +23,10 @@ async function runCommand(command) {
 }
 
 async function init() {
-  const { keepOriginal, autoTranslate } = await chrome.storage.local.get({ keepOriginal: true, autoTranslate: false });
+  const { keepOriginal, autoTranslate, ytSubtitles } = await chrome.storage.local.get({ keepOriginal: true, autoTranslate: false, ytSubtitles: false });
   keep.checked = keepOriginal;
   auto.checked = autoTranslate;
+  yt.checked = ytSubtitles;
   updateHint();
   try {
     const [{ result }] = await chrome.scripting.executeScript({
@@ -45,6 +47,8 @@ keep.addEventListener('change', () => {
 });
 
 auto.addEventListener('change', () => chrome.storage.local.set({ autoTranslate: auto.checked }));
+
+yt.addEventListener('change', () => chrome.storage.local.set({ ytSubtitles: yt.checked }));
 
 for (const [btn, command] of [[toggleBtn, 'toggle'], [summaryBtn, 'summarize']]) {
   btn.addEventListener('click', async () => {
