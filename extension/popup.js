@@ -3,6 +3,7 @@ const summaryBtn = document.getElementById('summary');
 const keep = document.getElementById('keep');
 const auto = document.getElementById('auto');
 const yt = document.getElementById('yt');
+const hover = document.getElementById('hover');
 const msg = document.getElementById('msg');
 let tabId, ready = false, submitting = false, capabilities;
 const showError = text => { msg.textContent = text; msg.hidden = false; };
@@ -18,11 +19,11 @@ async function call(command) {
 }
 async function init() {
   try {
-    const settings = await chrome.storage.local.get({ keepOriginal: true, autoTranslate: false, ytSubtitles: false });
+    const settings = await chrome.storage.local.get({ keepOriginal: true, autoTranslate: false, ytSubtitles: false, hoverTranslate: true });
     keep.checked = settings.keepOriginal;
     document.querySelector('[value="translation"]').checked = !settings.keepOriginal;
-    auto.checked = settings.autoTranslate; yt.checked = settings.ytSubtitles;
-    hint(); document.getElementById('modeField').disabled = false; auto.disabled = yt.disabled = false;
+    auto.checked = settings.autoTranslate; yt.checked = settings.ytSubtitles; hover.checked = settings.hoverTranslate;
+    hint(); document.getElementById('modeField').disabled = false; auto.disabled = yt.disabled = hover.disabled = false;
     const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
     if (!tab?.id) throw new Error('找不到目前分頁。');
     tabId = tab.id;
@@ -47,7 +48,7 @@ for (const radio of document.querySelectorAll('[name="mode"]')) radio.addEventLi
   try { await chrome.storage.local.set({ keepOriginal: keep.checked }); hint(); }
   catch { showError('閱讀方式儲存失敗，請重試。'); }
 });
-for (const [control, key] of [[auto, 'autoTranslate'], [yt, 'ytSubtitles']]) control.addEventListener('change', async () => {
+for (const [control, key] of [[hover, 'hoverTranslate'], [auto, 'autoTranslate'], [yt, 'ytSubtitles']]) control.addEventListener('change', async () => {
   control.disabled = true;
   try { await chrome.storage.local.set({ [key]: control.checked }); }
   catch { control.checked = !control.checked; showError('設定儲存失敗，請重試。'); }

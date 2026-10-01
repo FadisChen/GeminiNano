@@ -7,11 +7,6 @@
   <link rel="stylesheet" href="popup.css">
 </head>
 <body>
-  <header>
-    <img src="icons/icon-48.png" width="38" height="38" alt="">
-    <div><h1>Nano<span>翻譯官</span></h1></div>
-    <span class="local"><i></i>本機處理</span>
-  </header>
   <main>
     <section class="reading" aria-label="此頁閱讀工具">
       <p class="eyebrow">此頁閱讀 <span>EN / JA → 繁中</span></p>
@@ -29,12 +24,12 @@
       <p id="keepHint" class="hint">原文與譯文一起閱讀</p>
     </fieldset>
     <section class="preferences" aria-label="自動化設定">
+      <label class="row" for="hover"><span><strong>滑鼠停留翻譯</strong><small>未翻譯此頁時，指向文字區塊彈出譯文</small></span><span class="switch"><input type="checkbox" id="hover" disabled><span class="slider"></span></span></label>
       <label class="row" for="auto"><span><strong>自動翻譯新頁面</strong><small>載入英文、日文頁面時啟動</small></span><span class="switch"><input type="checkbox" id="auto" disabled><span class="slider"></span></span></label>
       <label class="row" for="yt"><span><strong>YouTube 雙語字幕</strong><small>開啟 CC 後顯示繁中譯文</small></span><span class="switch"><input type="checkbox" id="yt" disabled><span class="slider"></span></span></label>
     </section>
     <p id="msg" class="msg" role="alert" hidden></p>
   </main>
-  <footer><span class="privacy-mark" aria-hidden="true">◇</span><p>內容留在本機，首次下載模型需連線。<br><span>翻譯：Chrome 翻譯模型 · 摘要：Gemini Nano</span></p></footer>
   <script src="popup.js"></script>
 </body>
 </html>
