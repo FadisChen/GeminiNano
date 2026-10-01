@@ -1,378 +1,326 @@
-(() => {
-  if (window.__nt) return; // 已初始化；操作由 popup 呼叫 window.__nt 的方法
-
-  const TARGETS = ['zh-Hant', 'zh'];
-  // 候選：語意區塊 + 常見的純文字容器（div/span/a/label/button）
-  const CANDIDATE_SELECTOR = 'p,li,h1,h2,h3,h4,h5,h6,blockquote,figcaption,dd,dt,summary,td,th,div,span,a,label,button';
-  // 內含這些元素的容器不直接翻譯，改翻譯它們的內層
-  const BLOCKISH = 'p,li,h1,h2,h3,h4,h5,h6,blockquote,figcaption,dd,dt,summary,td,th,div,section,article,aside,header,footer,nav,main,ul,ol,table,tr,form,pre,button,a';
-  const SKIP_ANCESTORS = 'pre,code,script,style,noscript,textarea,select,[contenteditable="true"],.nt-ui,.nt-trans';
-  const MARK = 'data-nt-state'; // queued | done | skipped
-  const CONCURRENCY = 2;
-
-  const state = { on: false, translators: new Map(), queue: [], running: 0, done: 0, total: 0, io: null, mo: null };
-
-  // ---- 設定：是否保留原文 ----
-  const applyMode = (keepOriginal) => document.documentElement.classList.toggle('nt-replace', !keepOriginal);
-  chrome.storage.local.get({ keepOriginal: true }).then((v) => applyMode(v.keepOriginal));
-  chrome.storage.onChanged.addListener((changes) => {
-    if (changes.keepOriginal) applyMode(changes.keepOriginal.newValue);
+﻿(() => {
+  if (window.__nt) return;
+  const N = window.__nano;
+  const SKIP = 'script,style,noscript,pre,code,textarea,select,input,svg,math,[translate="no"],[data-nano-tools],.nt-run,.ytp-caption-window-container,.nt-yt';
+  let current = null, summaryJob = null, keepOriginal = true, settingRevision = 0;
+  const owned = new Set();
+  const styles = N.el('style');
+  styles.textContent = `
+    .nt-run{display:inline!important}.nt-original{display:contents!important}
+    .nt-translated{color:#23634d!important;background:#e9efe780;border-radius:3px;padding:0 .12em;white-space:pre-wrap}
+    .nt-run[data-mode="bilingual"]>.nt-translated::before{content:' / ';color:#7a8d80}
+    .nt-run[data-mode="translation"]>.nt-original{display:none!important}
+    .nt-run[data-mode="translation"]>.nt-translated{color:inherit!important;background:transparent;padding:0}
+    .nt-translated:focus-visible{outline:2px solid #398966;outline-offset:3px}
+    @media(prefers-color-scheme:dark){.nt-translated{color:#a7d7b6!important;background:#28413480}}
+  `;
+  document.documentElement.append(styles);
+  const alive = job => !job.ctrl.signal.aborted;
+  const applyMode = () => {
+    for (const record of owned) record.wrapper.dataset.mode = keepOriginal ? 'bilingual' : 'translation';
+    if (keepOriginal) N.ui().tip.hidden = true;
+  };
+  (async () => {
+    const revision = settingRevision;
+    try { const values = await chrome.storage.local.get({ keepOriginal: true }); if (revision === settingRevision) { keepOriginal = values.keepOriginal; applyMode(); } }
+    catch (error) { console.error('[nano] 設定讀取失敗', error); }
+  })();
+  chrome.storage.onChanged.addListener((changes, area) => {
+    if (area === 'local' && changes.keepOriginal) { settingRevision++; keepOriginal = changes.keepOriginal.newValue !== false; applyMode(); }
   });
 
-  // ---- UI ----
-  const ui = document.createElement('div');
-  ui.className = 'nt-ui';
-  ui.style.cssText = 'position:fixed;right:16px;bottom:16px;z-index:2147483647;background:#1f2937;color:#fff;' +
-    'font:13px/1.4 system-ui,sans-serif;padding:8px 12px;border-radius:8px;box-shadow:0 2px 8px #0004;' +
-    'display:none;max-width:280px;';
-  const uiText = document.createElement('span');
-  const uiBtn = document.createElement('button');
-  uiBtn.style.cssText = 'margin-left:8px;display:none;cursor:pointer;';
-  ui.append(uiText, uiBtn);
-  document.documentElement.append(ui);
-
-  const say = (msg) => { ui.style.display = 'block'; uiText.textContent = msg; };
-  const progress = () => say(state.done >= state.total && !state.queue.length ? `翻譯完成（${state.done} 段）` : `翻譯中 ${state.done}/${state.total}`);
-
-  // ---- style ----
-  const css = document.createElement('style');
-  css.textContent = `
-    .nt-orig{display:contents}
-    .nt-trans{display:block;margin-top:.25em;color:#2563eb;border-left:3px solid #93c5fd;padding-left:.5em;}
-    html.nt-replace .nt-orig{display:none}
-    html.nt-replace .nt-trans{margin:0;color:inherit;border:0;padding:0}`;
-  document.documentElement.append(css);
-
-  // ---- 「只顯示譯文」模式：滑鼠移到譯文上時彈出原文 ----
-  const TIP_BG_ALPHA = 0.3; // 背景不透明度 30%
-  const tip = document.createElement('div');
-  tip.className = 'nt-ui';
-  tip.style.cssText = `position:fixed;z-index:2147483647;display:none;max-width:420px;pointer-events:none;` +
-    `padding:8px 12px;border-radius:8px;color:#fff;font:14px/1.5 system-ui,sans-serif;white-space:pre-wrap;` +
-    `background:rgba(17,24,39,${TIP_BG_ALPHA});backdrop-filter:blur(8px);-webkit-backdrop-filter:blur(8px);` +
-    `text-shadow:0 1px 2px rgba(0,0,0,.8);box-shadow:0 2px 12px rgba(0,0,0,.25);`;
-  document.documentElement.append(tip);
-
-  const hideTip = () => { tip.style.display = 'none'; tip.dataset.for = ''; };
-  function moveTip(e) {
-    const pad = 14;
-    const x = Math.min(e.clientX + pad, window.innerWidth - tip.offsetWidth - 8);
-    const below = e.clientY + pad + tip.offsetHeight < window.innerHeight;
-    tip.style.left = `${Math.max(8, x)}px`;
-    tip.style.top = `${below ? e.clientY + pad : Math.max(8, e.clientY - pad - tip.offsetHeight)}px`;
+  function isExcluded(node) {
+    return !node.parentElement || node.parentElement.closest(SKIP) || node.parentElement.isContentEditable;
   }
-  function onTipOver(e) {
-    if (!document.documentElement.classList.contains('nt-replace')) return;
-    const el = e.target.closest?.(`[${MARK}="done"]`);
-    if (!el) return;
-    const orig = el.querySelector(':scope > .nt-orig');
-    if (!orig) return;
-    tip.textContent = orig.textContent.replace(/\s+/g, ' ').trim();
-    tip.style.display = 'block';
-    moveTip(e);
-  }
-  function onTipOut(e) {
-    const el = e.target.closest?.(`[${MARK}="done"]`);
-    if (el && !el.contains(e.relatedTarget)) hideTip();
-  }
-  const onTipMove = (e) => { if (tip.style.display === 'block') moveTip(e); };
-
-  // ---- 語言判斷（只支援 en / ja）----
-  function detect(text) {
-    if (/[぀-ヿ]/.test(text)) return 'ja';
-    const letters = text.match(/\p{L}/gu) || [];
-    if (letters.length < 3) return null;
-    const latin = text.match(/[A-Za-z]/g) || [];
-    return latin.length / letters.length > 0.8 ? 'en' : null;
-  }
-
-  // ---- translator ----
-  function waitForClick(label) {
-    return new Promise((resolve) => {
-      uiBtn.textContent = label;
-      uiBtn.style.display = 'inline-block';
-      uiBtn.onclick = () => { uiBtn.style.display = 'none'; uiBtn.onclick = null; resolve(); };
-    });
-  }
-
-  function getTranslator(source) {
-    if (!state.translators.has(source)) {
-      state.translators.set(source, (async () => {
-        for (const target of TARGETS) {
-          const opts = { sourceLanguage: source, targetLanguage: target };
-          let avail;
-          try { avail = await Translator.availability(opts); } catch { continue; }
-          if (avail === 'unavailable') continue;
-          if (avail !== 'available' && !navigator.userActivation.isActive) {
-            say(`需要下載 ${source}→${target} 語言模型`);
-            await waitForClick('下載');
-          }
-          say(`準備 ${source}→${target} 模型…`);
-          return Translator.create({
-            ...opts,
-            monitor(m) {
-              m.addEventListener('downloadprogress', (e) => say(`下載模型 ${Math.round(e.loaded * 100)}%`));
-            },
-          });
-        }
-        throw new Error(`不支援 ${source} → 繁體中文`);
-      })());
-    }
-    return state.translators.get(source);
-  }
-
-  // ---- translate pipeline ----
-  async function translateEl(el) {
-    const text = el.innerText.trim();
-    const lang = detect(text);
-    if (!lang) { el.setAttribute(MARK, 'skipped'); state.total--; return; }
-    const tr = await getTranslator(lang);
-    const out = await tr.translate(text);
-    if (!state.on) return;
-    // 原文搬進 wrapper，才能在「只顯示譯文」模式下隱藏
-    const orig = document.createElement('span');
-    orig.className = 'nt-orig';
-    orig.append(...el.childNodes);
-    const node = document.createElement('span');
-    node.className = 'nt-trans';
-    node.textContent = out;
-    el.append(orig, node);
-    el.setAttribute(MARK, 'done');
-    state.done++;
-  }
-
-  async function pump() {
-    while (state.on && state.running < CONCURRENCY && state.queue.length) {
-      const el = state.queue.shift();
-      state.running++;
-      translateEl(el)
-        .catch((err) => { console.error('[nt]', err); say(`錯誤：${err.message}`); el.setAttribute(MARK, 'skipped'); })
-        .finally(() => { state.running--; progress(); pump(); });
+  function restore(record) {
+    owned.delete(record);
+    // Do not resurrect content the site has removed or replaced.
+    if (record.wrapper.isConnected && record.original.parentNode === record.wrapper) {
+      record.wrapper.replaceWith(...record.original.childNodes);
     }
   }
-
-  function candidate(el) {
-    if (el.hasAttribute(MARK) || el.closest(SKIP_ANCESTORS)) return false;
-    if (el.parentElement?.closest(`[${MARK}]`)) return false; // 祖先已處理
-    if (el.querySelector(BLOCKISH)) return false;             // 只翻最內層容器
-    return (el.innerText || '').trim().length >= 4;
+  function tooltip(record, anchor) {
+    if (keepOriginal) return;
+    const tip = N.ui().tip;
+    tip.textContent = record.node.data;
+    tip.hidden = false;
+    const rect = anchor.getBoundingClientRect();
+    tip.style.left = `${Math.max(8, Math.min(rect.left, innerWidth - tip.offsetWidth - 8))}px`;
+    tip.style.top = `${Math.max(8, Math.min(rect.bottom + 8, innerHeight - tip.offsetHeight - 8))}px`;
   }
-
-  function observe(root) {
-    const els = root.matches?.(CANDIDATE_SELECTOR) ? [root] : [];
-    els.push(...root.querySelectorAll(CANDIDATE_SELECTOR));
-    for (const el of els) {
-      if (!candidate(el)) continue;
-      el.setAttribute(MARK, 'queued');
-      state.total++;
-      state.io.observe(el);
-    }
+  function attachTranslation(record, out) {
+    const wrapper = N.el('span', '', 'nt-run');
+    const original = N.el('span', '', 'nt-original');
+    const translated = N.el('span', out, 'nt-translated');
+    translated.tabIndex = 0;
+    translated.lang = 'zh-Hant';
+    translated.setAttribute('aria-label', `${out}。原文：${record.text.trim()}`);
+    wrapper.dataset.mode = keepOriginal ? 'bilingual' : 'translation';
+    record.wrapper = wrapper; record.original = original;
+    record.node.replaceWith(wrapper);
+    original.append(record.node);
+    wrapper.append(original, translated);
+    owned.add(record);
+    translated.addEventListener('mouseenter', () => tooltip(record, translated));
+    translated.addEventListener('focus', () => tooltip(record, translated));
+    translated.addEventListener('mouseleave', () => { N.ui().tip.hidden = true; });
+    translated.addEventListener('blur', () => { N.ui().tip.hidden = true; });
   }
-
-  function start() {
-    state.on = true;
-    state.done = state.total = 0;
-    state.io = new IntersectionObserver((entries) => {
-      for (const e of entries) {
-        if (!e.isIntersecting) continue;
-        state.io.unobserve(e.target);
-        state.queue.push(e.target);
-      }
-      pump();
-    }, { rootMargin: '400px 0px' });
-    state.mo = new MutationObserver((muts) => {
-      for (const m of muts) for (const n of m.addedNodes) if (n.nodeType === 1 && !n.closest?.('.nt-ui,.nt-trans,.nt-orig')) observe(n);
-    });
-    state.mo.observe(document.body, { childList: true, subtree: true });
-    document.addEventListener('mouseover', onTipOver);
-    document.addEventListener('mouseout', onTipOut);
-    document.addEventListener('mousemove', onTipMove);
-    say('翻譯中…');
-    observe(document.body);
+  function report(job) {
+    if (!alive(job)) return;
+    const busy = job.running || job.queue.length || job.scanning;
+    const failed = job.failed.size;
+    const done = [...job.records.values()].filter(r => r.state === 'done').length;
+    job.phase = failed ? 'partial' : busy ? 'translating' : 'idle';
+    const text = failed ? `部分失敗（${failed} 段）：${job.error}` : busy ? `翻譯中 · 已完成 ${done} 段` : `目前可見內容完成 · ${done} 段（捲動後繼續）`;
+    job.message = text;
+    const actions = failed ? [['重試失敗段落', () => retry(job)], ['還原此頁', stop]] : [['還原此頁', stop]];
+    N.ui().status('translation', text, actions);
   }
-
-  function stop() {
-    state.on = false;
-    state.io?.disconnect();
-    state.mo?.disconnect();
-    state.queue.length = 0;
-    document.removeEventListener('mouseover', onTipOver);
-    document.removeEventListener('mouseout', onTipOut);
-    document.removeEventListener('mousemove', onTipMove);
-    hideTip();
-    document.querySelectorAll('.nt-trans').forEach((n) => n.remove());
-    document.querySelectorAll('.nt-orig').forEach((n) => n.replaceWith(...n.childNodes));
-    document.querySelectorAll(`[${MARK}]`).forEach((n) => n.removeAttribute(MARK));
-    ui.style.display = 'none';
+  function retry(job) {
+    if (!alive(job)) return;
+    for (const record of job.failed) { record.state = 'queued'; job.queue.push(record); }
+    job.failed.clear(); job.error = '';
+    pump(job);
   }
-
-  // ---- 網頁重點摘要（結果一律為繁體中文）----
-  const sumCss = document.createElement('style');
-  sumCss.textContent = `
-    .nt-sum{position:fixed;top:16px;right:16px;width:360px;max-width:calc(100vw - 32px);max-height:70vh;display:none;
-      flex-direction:column;background:#fff;color:#111827;border-radius:14px;box-shadow:0 10px 32px rgba(0,0,0,.28);
-      font:14px/1.6 system-ui,'Microsoft JhengHei',sans-serif;z-index:2147483647;overflow:hidden}
-    .nt-sum-head{display:flex;align-items:center;justify-content:space-between;padding:10px 14px;color:#fff;font-weight:600;
-      background:linear-gradient(135deg,#3b82f6,#1d4ed8)}
-    .nt-sum-head button{all:unset;cursor:pointer;padding:0 6px;font-size:18px;line-height:1}
-    .nt-sum-body{padding:12px 16px;overflow:auto}
-    .nt-sum-body ul{margin:0;padding-left:1.2em}
-    .nt-sum-body li{margin:.35em 0}
-    .nt-sum-body p{margin:.4em 0}
-    .nt-sum-status{color:#6b7280}
-    .nt-sum-foot{padding:8px 14px;border-top:1px solid #e5e7eb;text-align:right}
-    .nt-sum-foot button{all:unset;cursor:pointer;color:#2563eb;font-size:13px}`;
-  document.documentElement.append(sumCss);
-
-  const panel = document.createElement('div');
-  panel.className = 'nt-ui nt-sum';
-  const panelHead = document.createElement('div');
-  panelHead.className = 'nt-sum-head';
-  const panelTitle = document.createElement('span');
-  panelTitle.textContent = '網頁重點摘要';
-  const panelClose = document.createElement('button');
-  panelClose.textContent = '×';
-  panelClose.title = '關閉';
-  panelClose.onclick = () => { panel.style.display = 'none'; sumRun++; };
-  panelHead.append(panelTitle, panelClose);
-  const panelBody = document.createElement('div');
-  panelBody.className = 'nt-sum-body';
-  const panelFoot = document.createElement('div');
-  panelFoot.className = 'nt-sum-foot';
-  const panelCopy = document.createElement('button');
-  panelCopy.textContent = '複製摘要';
-  panelCopy.onclick = async () => {
-    await navigator.clipboard.writeText(panelBody.innerText);
-    panelCopy.textContent = '已複製 ✓';
-    setTimeout(() => { panelCopy.textContent = '複製摘要'; }, 1500);
-  };
-  panelFoot.append(panelCopy);
-  panel.append(panelHead, panelBody, panelFoot);
-  document.documentElement.append(panel);
-
-  let sumRun = 0; // 遞增以作廢進行中的舊摘要
-
-  const sumStatus = (msg) => {
-    const p = document.createElement('p');
-    p.className = 'nt-sum-status';
-    p.textContent = msg;
-    panelBody.replaceChildren(p);
-    panelFoot.style.display = 'none';
-    panel.style.display = 'flex';
-  };
-
-  // markdown 條列 → DOM（只用 textContent，不用 innerHTML）
-  function renderSummary(markdown) {
-    const ul = document.createElement('ul');
-    const frag = [];
-    for (const raw of markdown.split('\n')) {
-      const line = raw.trim();
-      if (!line) continue;
-      const m = line.match(/^[*\-•]\s+(.*)$/);
-      if (m) {
-        const li = document.createElement('li');
-        li.textContent = m[1].replace(/\*\*/g, '');
-        ul.append(li);
-      } else {
-        const p = document.createElement('p');
-        p.textContent = line.replace(/\*\*/g, '');
-        frag.push(p);
-      }
-    }
-    panelBody.replaceChildren(...frag, ...(ul.childElementCount ? [ul] : []));
-    panelFoot.style.display = 'block';
-  }
-
-  function pageText() {
-    const root = document.querySelector('article, main, [role="main"]') || document.body;
-    const parts = [];
-    for (const el of root.querySelectorAll('h1,h2,h3,h4,p,li,blockquote,td')) {
-      if (el.closest('nav,footer,aside,script,style,noscript,.nt-ui') || el.querySelector('p,li,blockquote')) continue;
-      const t = (el.querySelector(':scope > .nt-orig') || el).textContent.replace(/\s+/g, ' ').trim();
-      if (t.length >= 2) parts.push(t);
-    }
-    const joined = parts.join('\n');
-    return joined.length >= 200 ? joined : root.innerText.trim();
-  }
-
-  async function gateDownload(avail, label) {
-    if (avail !== 'available' && !navigator.userActivation.isActive) {
-      say(`需要下載${label}`);
-      await waitForClick('下載');
-    }
-  }
-
-  async function summarize() {
-    const run = ++sumRun;
-    const alive = () => run === sumRun;
+  async function translateRecord(job, record) {
     try {
-      let text = pageText();
-      if (text.length < 80) return sumStatus('這個頁面的文字太少，無法產生摘要。');
-      if (!('Summarizer' in self)) return sumStatus('這個瀏覽器不支援 Summarizer API。');
-
-      const sample = text.slice(0, 600);
-      const srcLang = detect(sample) || (/[一-鿿]/.test(sample) ? 'zh' : 'en');
-      const base = { type: 'key-points', format: 'markdown', length: 'medium' };
-
-      // 優先讓模型直接輸出繁體中文；不支援時改用「原文語言摘要 → Translator 翻成繁中」
-      let outputLanguage = null;
-      for (const t of TARGETS) {
-        try {
-          if ((await Summarizer.availability({ ...base, outputLanguage: t })) !== 'unavailable') { outputLanguage = t; break; }
-        } catch { /* 該語言不支援，試下一個 */ }
-      }
-      const viaTranslator = !outputLanguage;
-      if (viaTranslator) {
-        if (srcLang === 'zh') return sumStatus('此環境的 Summarizer 無法輸出中文。');
-        outputLanguage = srcLang;
-      }
-
-      const opts = { ...base, outputLanguage, sharedContext: document.title };
-      await gateDownload(await Summarizer.availability(opts), '摘要模型');
-      sumStatus('準備摘要模型…');
-      const summarizer = await Summarizer.create({
-        ...opts,
-        monitor(m) {
-          m.addEventListener('downloadprogress', (e) => sumStatus(`下載摘要模型 ${Math.round(e.loaded * 100)}%`));
-        },
-      });
-      if (!state.on) ui.style.display = 'none';
-      if (!alive()) return;
-
-      while (summarizer.inputQuota && (await summarizer.measureInputUsage(text)) > summarizer.inputQuota && text.length > 200) {
-        text = text.slice(0, Math.floor(text.length * 0.8));
-      }
-
-      sumStatus('正在閱讀頁面並產生摘要…');
-      let acc = '';
-      for await (const chunk of summarizer.summarizeStreaming(text, { context: document.title })) {
-        if (!alive()) return;
-        acc = acc && chunk.startsWith(acc) ? chunk : acc + chunk;
-        if (!viaTranslator) renderSummary(acc);
-      }
-
-      if (viaTranslator) {
-        sumStatus('翻譯成繁體中文…');
-        const tr = await getTranslator(srcLang);
-        if (!state.on) ui.style.display = 'none'; // 清掉「準備模型」提示（翻譯進行中時由翻譯流程接管）
-        const lines = [];
-        for (const line of acc.split('\n')) {
-          const m = line.trim().match(/^([*\-•]\s+)?(.*)$/);
-          lines.push(m[2] ? (m[1] || '') + (await tr.translate(m[2])) : '');
-          if (!alive()) return;
-        }
-        renderSummary(lines.join('\n'));
-      }
-      summarizer.destroy();
-    } catch (err) {
-      console.error('[nt] summarize', err);
-      sumStatus(`摘要失敗：${err.message}`);
+      if (!record.node.isConnected || record.node.data !== record.text) return;
+      const model = await job.getTranslator(record.lang);
+      N.check(job.ctrl.signal);
+      const output = await model.translate(record.text.trim(), { signal: job.ctrl.signal });
+      N.check(job.ctrl.signal);
+      if (job.records.get(record.node) !== record || !record.node.isConnected || record.node.data !== record.text || isExcluded(record.node)) return;
+      attachTranslation(record, output);
+      record.state = 'done';
+    } catch (error) {
+      if (!alive(job)) return;
+      record.state = 'failed'; job.failed.add(record);
+      job.error = error.name === 'AbortError' ? '模型準備已取消，可重試。' : error.message;
+    } finally {
+      job.running--;
+      if (alive(job)) { report(job); pump(job); }
     }
   }
+  function pump(job) {
+    if (!alive(job)) return;
+    if (job.failed.size) { report(job); return; }
+    while (job.running < 2 && job.queue.length) {
+      const record = job.queue.shift();
+      if (job.records.get(record.node) !== record) continue;
+      record.state = 'running'; job.running++;
+      void translateRecord(job, record);
+    }
+    report(job);
+  }
+  function scheduleScan(job, root) {
+    if (!alive(job) || !root?.isConnected || root.closest?.('[data-nano-tools]')) return;
+    // Coalesce descendants under already-scheduled ancestors.
+    for (const pending of job.roots) if (pending.contains(root)) return;
+    for (const pending of job.roots) if (root.contains(pending)) job.roots.delete(pending);
+    job.roots.add(root);
+    if (!job.scanning) { job.scanning = true; setTimeout(() => { void scan(job); }, 0); }
+  }
+  async function scan(job) {
+    try {
+      let visited = 0;
+      while (alive(job) && job.roots.size) {
+        const root = job.roots.values().next().value;
+        job.roots.delete(root);
+        const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+        let node;
+        while (alive(job) && (node = walker.nextNode())) {
+          if (++visited % 150 === 0) { await new Promise(resolve => setTimeout(resolve, 0)); if (!alive(job)) return; }
+          if (!node.isConnected || isExcluded(node) || job.records.has(node)) continue;
+          const text = node.data;
+          const lang = N.detect(text, node.parentElement);
+          if (!lang || text.trim().length < 3) continue;
+          const record = { node, text, lang, state: 'waiting' };
+          job.records.set(node, record);
+          const parent = node.parentElement;
+          if (!job.observed.has(parent)) { job.observed.set(parent, new Set()); job.io.observe(parent); }
+          job.observed.get(parent).add(record);
+        }
+      }
+    } finally { job.scanning = false; report(job); }
+  }
+  function mutations(job, entries) {
+    if (!alive(job)) return;
+    for (const entry of entries) {
+      if (entry.target.parentElement?.closest('[data-nano-tools]') || entry.target.closest?.('[data-nano-tools]')) continue;
+      const root = entry.target.nodeType === Node.TEXT_NODE ? entry.target.parentElement : entry.target;
+      scheduleScan(job, root);
+    }
+    // Validate owned records only after page mutations, including SPA removals.
+    for (const [node, record] of job.records) {
+      const altered = !node.isConnected || node.data !== record.text || (record.wrapper && (!record.wrapper.isConnected || !record.original.contains(node)));
+      if (!altered) continue;
+      const root = record.wrapper?.parentElement || node.parentElement;
+      if (record.wrapper) restore(record);
+      job.records.delete(node); job.failed.delete(record);
+      scheduleScan(job, root);
+    }
+  }
+  function start() {
+    if (current) return;
+    const ctrl = new AbortController();
+    const job = { ctrl, getTranslator: N.translatorPool(ctrl.signal), records: new Map(), observed: new Map(), failed: new Set(), roots: new Set(), queue: [], running: 0, scanning: false, phase: 'translating', message: '正在準備翻譯…' };
+    current = job;
+    job.io = new IntersectionObserver(entries => {
+      if (!alive(job)) return;
+      for (const entry of entries) {
+        if (!entry.isIntersecting) continue;
+        const records = job.observed.get(entry.target);
+        for (const record of records || []) if (record.state === 'waiting') { record.state = 'queued'; job.queue.push(record); }
+        job.observed.delete(entry.target); job.io.unobserve(entry.target);
+      }
+      pump(job);
+    }, { rootMargin: '400px 0px' });
+    job.mo = new MutationObserver(entries => mutations(job, entries));
+    job.mo.observe(document.body, { childList: true, subtree: true, characterData: true });
+    scheduleScan(job, document.body);
+    report(job);
+  }
+  function stop() {
+    const job = current;
+    if (!job) return;
+    current = null;
+    job.mo.disconnect(); job.io.disconnect(); job.ctrl.abort();
+    job.queue.length = 0; job.roots.clear();
+    for (const record of [...owned]) restore(record);
+    N.ui().tip.hidden = true;
+    N.ui().status('translation', '');
+  }
 
+  // Extract original visible text, never translated output or tool UI.
+  function pageParagraphs() {
+    const root = document.querySelector('article,main,[role="main"]') || document.body;
+    const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+    const groups = new Map();
+    let node;
+    while ((node = walker.nextNode())) {
+      const parent = node.parentElement;
+      if (!parent || parent.closest('nav,footer,aside,script,style,noscript,pre,code,textarea,select,[data-nano-tools],.nt-translated,.nt-yt,.ytp-caption-window-container') || parent.isContentEditable) continue;
+      const visible = parent.closest('.nt-run') || parent;
+      if (!visible.getClientRects().length || getComputedStyle(visible).visibility === 'hidden') continue;
+      const block = parent.closest('p,li,h1,h2,h3,h4,h5,h6,blockquote,td,th,div,section,article,main') || root;
+      groups.set(block, (groups.get(block) || '') + node.data);
+    }
+    return [...groups.values()].map(s => s.replace(/\s+/g, ' ').trim()).filter(Boolean);
+  }
+  function renderSummary(text) {
+    const body = N.ui().body;
+    const fragment = document.createDocumentFragment();
+    let list = null, kind = '';
+    for (const line of text.split('\n').map(s => s.trim()).filter(Boolean)) {
+      const bullet = line.match(/^(?:[-*•]|\d+[.)])\s+(.*)$/);
+      if (bullet) {
+        const nextKind = /^\d/.test(line) ? 'ol' : 'ul';
+        if (!list || kind !== nextKind) { list = N.el(nextKind); kind = nextKind; fragment.append(list); }
+        list.append(N.el('li', bullet[1].replace(/\*\*/g, '')));
+      } else { list = null; fragment.append(N.el('p', line.replace(/^#{1,6}\s+/, '').replace(/\*\*/g, ''))); }
+    }
+    body.replaceChildren(fragment);
+  }
+  function cancelSummary() {
+    summaryJob?.ctrl.abort(); summaryJob = null;
+    N.ui().summary.hidden = true;
+  }
+  function summarize() {
+    summaryJob?.ctrl.abort();
+    const ctrl = new AbortController();
+    const job = { ctrl, getTranslator: N.translatorPool(ctrl.signal) };
+    summaryJob = job;
+    const tools = N.ui();
+    tools.summary.hidden = false; tools.copy.disabled = true; tools.retry.hidden = true; tools.notice.textContent = '';
+    tools.body.replaceChildren(N.el('p', '正在讀取原文…'));
+    tools.close.onclick = cancelSummary;
+    tools.retry.onclick = summarize;
+    tools.close.focus({ preventScroll: true });
+    void runSummary(job);
+  }
+  async function runSummary(job) {
+    const signal = job.ctrl.signal;
+    const tools = N.ui();
+    let model;
+    let destroyed = false;
+    const destroy = () => { if (model && !destroyed) { destroyed = true; model.destroy(); } };
+    const status = text => { N.check(signal); tools.body.replaceChildren(N.el('p', text)); };
+    try {
+      const paragraphs = pageParagraphs();
+      let text = paragraphs.join('\n\n');
+      if (text.length < 80) throw new Error('這個頁面的文字太少，無法產生摘要。');
+      const source = N.detect(text.slice(0, 1200)) || (/[一-鿿]/u.test(text) ? 'zh' : null);
+      if (!source) throw new Error('目前摘要支援英文及日文文章。');
+      // Use a neutral supported context; a localized page title may not be supported.
+      const context = 'Summarize the main points of this article.';
+      const base = { type: 'key-points', format: 'markdown', length: 'medium', expectedInputLanguages: [source], expectedContextLanguages: ['en'] };
+      const direct = { ...base, outputLanguage: 'zh-Hant' };
+      const available = await N.availability('Summarizer', direct);
+      N.check(signal);
+      const viaTranslator = available === 'unavailable';
+      if (viaTranslator && source === 'zh') throw new Error('此環境尚不支援中文文章摘要。');
+      const options = viaTranslator ? { ...base, outputLanguage: source } : direct;
+      status('正在準備摘要模型…');
+      model = await N.createModel('Summarizer', options, signal, '文章摘要');
+      signal.addEventListener('abort', destroy, { once: true });
+      N.check(signal);
+      let count = paragraphs.length;
+      if (model.inputQuota && model.measureInputUsage) {
+        while (await model.measureInputUsage(text, { context }) > model.inputQuota) {
+          N.check(signal);
+          if (--count === 0) throw new Error('單一段落超過摘要容量，請改用較短的文章。');
+          text = paragraphs.slice(0, count).join('\n\n');
+        }
+      }
+      N.check(signal);
+      if (count < paragraphs.length) tools.notice.textContent = '僅摘要文章前段（內容超過模型容量）';
+      status('正在產生重點摘要…');
+      let result = '';
+      for await (const chunk of model.summarizeStreaming(text, { context, signal })) {
+        N.check(signal);
+        result += chunk;
+        if (!viaTranslator) renderSummary(result);
+      }
+      N.check(signal);
+      if (viaTranslator) {
+        status('正在將摘要翻成繁體中文…');
+        const translator = await job.getTranslator(source);
+        N.check(signal);
+        const lines = [];
+        for (const line of result.split('\n')) {
+          const match = line.match(/^(\s*(?:[-*•]|\d+[.)])\s+)?(.*)$/);
+          const translated = match[2].trim() ? await translator.translate(match[2], { signal }) : '';
+          N.check(signal);
+          lines.push((match[1] || '') + translated);
+        }
+        result = lines.join('\n');
+      }
+      if (!result.trim()) throw new Error('模型沒有產生摘要，請重試。');
+      N.check(signal); renderSummary(result); tools.copy.disabled = false;
+    } catch (error) {
+      if (!signal.aborted) { status(error.name === 'AbortError' ? '模型準備已取消。' : `摘要失敗：${error.message}`); tools.retry.hidden = false; }
+    } finally { destroy(); signal.removeEventListener('abort', destroy); job.ctrl.abort(); }
+  }
+  N.ui().copy.addEventListener('click', async () => {
+    const job = summaryJob;
+    try {
+      await navigator.clipboard.writeText(N.ui().body.innerText);
+      if (summaryJob === job) N.ui().notice.textContent = `${N.ui().notice.textContent.includes('僅摘要') ? '僅摘要文章前段 · ' : ''}已複製`;
+    } catch { if (summaryJob === job) N.ui().notice.textContent = '無法複製，請選取摘要文字手動複製。'; }
+  });
+  document.addEventListener('keydown', e => {
+    if (e.key !== 'Escape') return;
+    N.ui().tip.hidden = true;
+    if (!N.ui().summary.hidden) cancelSummary();
+  });
+  window.addEventListener('pagehide', () => { stop(); cancelSummary(); });
   window.__nt = {
-    toggle: () => (state.on ? stop() : start()),
-    isOn: () => state.on,
-    summarize,
+    start, stop, toggle: () => current ? stop() : start(), isOn: () => Boolean(current), summarize,
+    getStatus: () => ({ on: Boolean(current), phase: current?.phase || 'off', message: current?.message || '準備好閱讀此頁' }),
+    capabilities: async () => ({
+      translation: await N.availability('Translator', { sourceLanguage: 'en', targetLanguage: 'zh-Hant' }),
+      summary: await N.availability('Summarizer', { type: 'key-points', format: 'markdown', length: 'medium', expectedInputLanguages: ['en'], outputLanguage: 'en' }),
+    }),
   };
 })();

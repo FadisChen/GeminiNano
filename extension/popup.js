@@ -1,64 +1,63 @@
 const toggleBtn = document.getElementById('toggle');
-const toggleLabel = document.getElementById('toggleLabel');
 const summaryBtn = document.getElementById('summary');
 const keep = document.getElementById('keep');
 const auto = document.getElementById('auto');
 const yt = document.getElementById('yt');
-const keepHint = document.getElementById('keepHint');
 const msg = document.getElementById('msg');
-
-const showError = (text) => { msg.textContent = text; msg.hidden = false; };
-const updateHint = () => { keepHint.textContent = keep.checked ? '雙語對照顯示' : '只顯示譯文，滑鼠移上去看原文'; };
-
-async function activeTabId() {
-  const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
-  return tab.id;
+let tabId, ready = false, submitting = false, capabilities;
+const showError = text => { msg.textContent = text; msg.hidden = false; };
+const hint = () => { document.getElementById('keepHint').textContent = keep.checked ? '原文與譯文一起閱讀' : '滑鼠移入或以 Tab 聚焦譯文，可查看原文'; };
+const available = state => !['unsupported', 'unavailable'].includes(state);
+function buttons() {
+  toggleBtn.disabled = !ready || submitting || (!toggleBtn.dataset.on && !available(capabilities?.translation));
+  summaryBtn.disabled = !ready || submitting || !available(capabilities?.summary);
 }
-
-// content.js 只負責初始化 window.__nt（可重複注入），實際動作再用 func 呼叫
-async function runCommand(command) {
-  const target = { tabId: await activeTabId() };
-  await chrome.scripting.executeScript({ target, files: ['content.js'] });
-  await chrome.scripting.executeScript({ target, func: (cmd) => window.__nt[cmd](), args: [command] });
+async function call(command) {
+  const results = await chrome.scripting.executeScript({ target: { tabId }, func: cmd => window.__nt[cmd](), args: [command] });
+  return results[0].result;
 }
-
 async function init() {
-  const { keepOriginal, autoTranslate, ytSubtitles } = await chrome.storage.local.get({ keepOriginal: true, autoTranslate: false, ytSubtitles: false });
-  keep.checked = keepOriginal;
-  auto.checked = autoTranslate;
-  yt.checked = ytSubtitles;
-  updateHint();
   try {
-    const [{ result }] = await chrome.scripting.executeScript({
-      target: { tabId: await activeTabId() },
-      func: () => Boolean(window.__nt?.isOn()),
-    });
-    toggleLabel.textContent = result ? '還原此頁' : '翻譯此頁';
-  } catch {
-    toggleBtn.disabled = true;
-    summaryBtn.disabled = true;
-    showError('此頁面無法使用（例如 chrome:// 或商店頁面）。');
+    const settings = await chrome.storage.local.get({ keepOriginal: true, autoTranslate: false, ytSubtitles: false });
+    keep.checked = settings.keepOriginal;
+    document.querySelector('[value="translation"]').checked = !settings.keepOriginal;
+    auto.checked = settings.autoTranslate; yt.checked = settings.ytSubtitles;
+    hint(); document.getElementById('modeField').disabled = false; auto.disabled = yt.disabled = false;
+    const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+    if (!tab?.id) throw new Error('找不到目前分頁。');
+    tabId = tab.id;
+    await chrome.scripting.executeScript({ target: { tabId }, files: ['runtime.js', 'content.js'] });
+    const state = await call('getStatus');
+    document.getElementById('toggleLabel').textContent = state.on ? '還原此頁' : '翻譯此頁';
+    toggleBtn.dataset.on = state.on ? 'true' : '';
+    document.getElementById('pageStatus').textContent = state.message;
+    capabilities = await call('capabilities');
+    const labels = { available: '可用', downloadable: '需準備模型', downloading: '模型下載中', unavailable: '目前不可用', unsupported: '此環境不支援' };
+    document.getElementById('translationState').textContent = `翻譯 · ${labels[capabilities.translation] || '未知狀態'}`;
+    document.getElementById('summaryState').textContent = `摘要 · ${labels[capabilities.summary] || '未知狀態'}`;
+    ready = true; buttons();
+  } catch (error) {
+    document.getElementById('pageStatus').textContent = '此頁暫時無法使用';
+    document.getElementById('translationState').textContent = '翻譯 · 無法檢查';
+    document.getElementById('summaryState').textContent = '摘要 · 無法檢查';
+    showError(`無法啟動。Chrome 設定頁、商店及部分受限制頁面不支援；一般頁面可重新整理後再試。${error.message}`);
   }
 }
-
-keep.addEventListener('change', () => {
-  updateHint();
-  chrome.storage.local.set({ keepOriginal: keep.checked });
+for (const radio of document.querySelectorAll('[name="mode"]')) radio.addEventListener('change', async () => {
+  try { await chrome.storage.local.set({ keepOriginal: keep.checked }); hint(); }
+  catch { showError('閱讀方式儲存失敗，請重試。'); }
 });
-
-auto.addEventListener('change', () => chrome.storage.local.set({ autoTranslate: auto.checked }));
-
-yt.addEventListener('change', () => chrome.storage.local.set({ ytSubtitles: yt.checked }));
-
-for (const [btn, command] of [[toggleBtn, 'toggle'], [summaryBtn, 'summarize']]) {
-  btn.addEventListener('click', async () => {
-    try {
-      await runCommand(command);
-      window.close();
-    } catch (err) {
-      showError(`執行失敗：${err.message}`);
-    }
-  });
-}
-
-init();
+for (const [control, key] of [[auto, 'autoTranslate'], [yt, 'ytSubtitles']]) control.addEventListener('change', async () => {
+  control.disabled = true;
+  try { await chrome.storage.local.set({ [key]: control.checked }); }
+  catch { control.checked = !control.checked; showError('設定儲存失敗，請重試。'); }
+  finally { control.disabled = false; }
+});
+for (const [button, command] of [[toggleBtn, 'toggle'], [summaryBtn, 'summarize']]) button.addEventListener('click', async () => {
+  if (!ready || submitting) return;
+  submitting = true; buttons();
+  try { await call(command); window.close(); }
+  catch (error) { showError(`執行失敗：${error.message}`); }
+  finally { submitting = false; buttons(); }
+});
+void init();

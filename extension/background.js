@@ -3,10 +3,10 @@ chrome.runtime.onMessage.addListener((message, sender) => {
   (async () => {
     const target = { tabId: sender.tab.id };
     try {
-      await chrome.scripting.executeScript({ target, files: ['content.js'] });
+      await chrome.scripting.executeScript({ target, files: ['runtime.js', 'content.js'] });
       await chrome.scripting.executeScript({
         target,
-        func: () => { if (!window.__nt.isOn()) window.__nt.toggle(); },
+        func: () => window.__nt.start(),
       });
     } catch (err) {
       console.error('自動翻譯失敗：', err);

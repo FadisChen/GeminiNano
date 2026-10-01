@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
   "name": "Nano翻譯官",
-  "version": "0.3.0",
-  "description": "使用 Chrome 內建 Gemini Nano 在本機把英文、日文網頁翻成繁體中文，可選擇是否保留原文。",
+  "version": "0.4.0",
+  "description": "透過 Chrome 本機翻譯模型閱讀英文、日文網頁與 YouTube 雙語字幕，使用 Gemini Nano 產生繁中摘要。",
   "icons": {
     "16": "icons/icon-16.png",
     "32": "icons/icon-32.png",
@@ -20,7 +20,7 @@
   "background": { "service_worker": "background.js" },
   "content_scripts": [
     { "matches": ["<all_urls>"], "js": ["auto.js"], "run_at": "document_idle" },
-    { "matches": ["https://www.youtube.com/*"], "js": ["yt-subs.js"], "run_at": "document_idle", "all_frames": true }
+    { "matches": ["https://www.youtube.com/*"], "js": ["runtime.js", "yt-subs.js"], "run_at": "document_idle", "all_frames": true }
   ],
   "permissions": ["activeTab", "scripting", "storage"],
   "host_permissions": ["<all_urls>"]

@@ -2,55 +2,39 @@
 <html lang="zh-Hant">
 <head>
   <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
   <title>Nano翻譯官</title>
   <link rel="stylesheet" href="popup.css">
 </head>
 <body>
+  <header>
+    <img src="icons/icon-48.png" width="38" height="38" alt="">
+    <div><h1>Nano<span>翻譯官</span></h1></div>
+    <span class="local"><i></i>本機處理</span>
+  </header>
   <main>
-    <button id="toggle" class="btn primary" type="button">
-      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12.9 15l-2.5-2.5c1.7-1.9 3-4.1 3.6-6.5H17V4h-7V2H8v2H1v2h11.2c-.6 1.8-1.6 3.5-2.9 5-.9-1-1.6-2-2.2-3H5.1c.7 1.5 1.6 2.9 2.7 4.2L2.9 17.1 4.3 18.5 9.3 13.5l3.1 3.1.5-1.6zM18.5 10h-2L12 22h2l1.1-3h4.8l1.1 3h2l-4.5-12zm-2.6 7l1.6-4.3 1.6 4.3h-3.2z"/></svg>
-      <span id="toggleLabel">翻譯此頁</span>
-    </button>
-
-    <label class="row" for="keep">
-      <span class="row-text">
-        <strong>保留原文</strong>
-        <small id="keepHint">雙語對照顯示</small>
-      </span>
-      <span class="switch">
-        <input type="checkbox" id="keep">
-        <span class="slider"></span>
-      </span>
-    </label>
-
-    <label class="row" for="auto">
-      <span class="row-text">
-        <strong>自動翻譯新頁面</strong>
-        <small>開啟的新分頁、彈出視窗自動翻譯</small>
-      </span>
-      <span class="switch">
-        <input type="checkbox" id="auto">
-        <span class="slider"></span>
-      </span>
-    </label>
-
-    <label class="row" for="yt">
-      <span class="row-text">
-        <strong>YouTube 雙語字幕</strong>
-        <small>開啟 CC 後，在原字幕下方加譯文</small>
-      </span>
-      <span class="switch">
-        <input type="checkbox" id="yt">
-        <span class="slider"></span>
-      </span>
-    </label>
-
-    <button id="summary" class="btn secondary" type="button">
-      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 5h16v2H4zm0 6h16v2H4zm0 6h10v2H4z"/></svg>
-      <span>產生重點摘要</span>
-    </button>
-    <p id="msg" class="msg" hidden></p>
+    <section class="reading" aria-label="此頁閱讀工具">
+      <p class="eyebrow">此頁閱讀 <span>EN / JA → 繁中</span></p>
+      <p id="pageStatus" role="status">正在檢查此頁…</p>
+      <button id="toggle" class="btn primary" type="button" disabled><span id="toggleLabel">翻譯此頁</span><span aria-hidden="true">↗</span></button>
+      <button id="summary" class="btn secondary" type="button" disabled><span>產生重點摘要</span><span aria-hidden="true">≡</span></button>
+      <div class="capabilities"><span id="translationState">翻譯 · 檢查中</span><span id="summaryState">摘要 · 檢查中</span></div>
+    </section>
+    <fieldset class="mode" disabled id="modeField">
+      <legend>閱讀方式</legend>
+      <div class="segments">
+        <label><input type="radio" name="mode" value="bilingual" id="keep" checked><span>雙語對照</span></label>
+        <label><input type="radio" name="mode" value="translation"><span>只看譯文</span></label>
+      </div>
+      <p id="keepHint" class="hint">原文與譯文一起閱讀</p>
+    </fieldset>
+    <section class="preferences" aria-label="自動化設定">
+      <label class="row" for="auto"><span><strong>自動翻譯新頁面</strong><small>載入英文、日文頁面時啟動</small></span><span class="switch"><input type="checkbox" id="auto" disabled><span class="slider"></span></span></label>
+      <label class="row" for="yt"><span><strong>YouTube 雙語字幕</strong><small>開啟 CC 後顯示繁中譯文</small></span><span class="switch"><input type="checkbox" id="yt" disabled><span class="slider"></span></span></label>
+    </section>
+    <p id="msg" class="msg" role="alert" hidden></p>
   </main>
+  <footer><span class="privacy-mark" aria-hidden="true">◇</span><p>內容留在本機，首次下載模型需連線。<br><span>翻譯：Chrome 翻譯模型 · 摘要：Gemini Nano</span></p></footer>
   <script src="popup.js"></script>
 </body>
 </html>

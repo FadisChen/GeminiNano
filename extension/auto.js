@@ -7,5 +7,5 @@
   const lang = document.documentElement.lang.toLowerCase();
   if (lang && !/^(en|ja)\b/.test(lang)) return;
 
-  chrome.runtime.sendMessage({ type: 'auto-translate' });
-})();
+  await chrome.runtime.sendMessage({ type: 'auto-translate' });
+})().catch(err => console.error('[nano] 自動翻譯啟動失敗', err));
