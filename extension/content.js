@@ -148,7 +148,10 @@
     if (!alive(job)) return;
     for (const entry of entries) {
       if (entry.target.parentElement?.closest('[data-nano-tools]') || entry.target.closest?.('[data-nano-tools]')) continue;
-      const root = entry.target.nodeType === Node.TEXT_NODE ? entry.target.parentElement : entry.target;
+      let root = entry.target.nodeType === Node.TEXT_NODE ? entry.target.parentElement : entry.target;
+      // 整個 <body> 被換掉（Turbo、view transitions 等）時，改掃新的 body；<head> 不翻譯。
+      if (root === document.documentElement) root = document.body;
+      if (!root || !document.body?.contains(root)) continue;
       scheduleScan(job, root);
     }
     // Validate owned records only after page mutations, including SPA removals.
@@ -177,7 +180,7 @@
       pump(job);
     }, { rootMargin: '400px 0px' });
     job.mo = new MutationObserver(entries => mutations(job, entries));
-    job.mo.observe(document.body, { childList: true, subtree: true, characterData: true });
+    job.mo.observe(document.documentElement, { childList: true, subtree: true, characterData: true });
     scheduleScan(job, document.body);
     report(job);
   }
