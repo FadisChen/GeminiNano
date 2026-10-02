@@ -14,6 +14,7 @@
     .nt-translated:focus-visible{outline:2px solid #398966;outline-offset:3px}
     @media(prefers-color-scheme:dark){.nt-translated{color:#a7d7b6!important;background:#28413480}.nt-translated[data-mode="translation"]{color:inherit!important;background:transparent}}
   `;
+  styles.textContent += 'html.nt-picking,html.nt-picking *{cursor:crosshair!important}';
   document.documentElement.append(styles);
   const alive = job => !job.ctrl.signal.aborted;
   const mode = () => keepOriginal ? 'bilingual' : 'translation';
@@ -263,16 +264,24 @@
     N.ui().status('translation', '');
   }
 
-  // Extract original visible text, never translated output or tool UI.
-  function pageParagraphs() {
-    const root = document.querySelector('article,main,[role="main"]') || document.body;
+  // Extract original visible text under `root`, never translated output or tool UI.
+  const ALWAYS_SKIP = 'script,style,noscript,textarea,select,[data-nano-tools],.nt-translated,.ytp-caption-window-container';
+  const STRUCTURAL_SKIP = 'nav,footer,aside,pre,code';
+  const defaultRoot = () => document.querySelector('article,main,[role="main"]') || document.body;
+  function paragraphsOf(root) {
     const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
     const groups = new Map();
     let node;
     while ((node = walker.nextNode())) {
       const parent = node.parentElement;
-      if (!parent || parent.closest('nav,footer,aside,script,style,noscript,pre,code,textarea,select,[data-nano-tools],.nt-translated,.ytp-caption-window-container') || parent.isContentEditable) continue;
-      if (!parent.getClientRects().length || getComputedStyle(parent).visibility === 'hidden') continue;
+      if (!parent || parent.closest(ALWAYS_SKIP) || parent.isContentEditable) continue;
+      // Structural exclusions only apply below the root, so picking e.g. an <aside> still works.
+      const structural = parent.closest(STRUCTURAL_SKIP);
+      if (structural && structural !== root && root.contains(structural)) continue;
+      // display:contents wrappers (our own .nt-original) have no box; judge visibility by the nearest real box.
+      let visible = parent;
+      while (visible.parentElement && getComputedStyle(visible).display === 'contents') visible = visible.parentElement;
+      if (!visible.getClientRects().length || getComputedStyle(visible).visibility === 'hidden') continue;
       const block = parent.closest('p,li,h1,h2,h3,h4,h5,h6,blockquote,td,th,div,section,article,main') || root;
       groups.set(block, (groups.get(block) || '') + node.data);
     }
@@ -302,22 +311,117 @@
     }
     N.ui().body.replaceChildren(fragment);
   }
+  // ---- Red-box highlight (also stays around the chosen block while its summary is open) ----
+  let boxElement = null;
+  function placeBox() {
+    const rect = boxElement.getBoundingClientRect(), box = N.ui().pickBox;
+    Object.assign(box.style, { left: `${rect.left - 2}px`, top: `${rect.top - 2}px`, width: `${rect.width + 4}px`, height: `${rect.height + 4}px` });
+  }
+  function showBox(element) { boxElement = element; N.ui().pickBox.hidden = false; placeBox(); }
+  function hideBox() { boxElement = null; N.ui().pickBox.hidden = true; }
+  const refreshBox = () => { if (!boxElement) return; if (boxElement.isConnected) placeBox(); else hideBox(); };
+  window.addEventListener('scroll', refreshBox, { capture: true, passive: true });
+  window.addEventListener('resize', refreshBox);
+
+  // ---- Pick a block with the mouse, then summarize only that block ----
+  let picker = null;
+  const POINTER_EVENTS = ['mousedown', 'mouseup', 'pointerdown', 'pointerup', 'click', 'dblclick', 'auxclick'];
+  function pickSummary() {
+    picker?.cancel();
+    cancelSummary();
+    const tools = N.ui();
+    let target = null, parents = [], lock = null, lastMouse = { x: 0, y: 0 };
+    const fromUi = e => e.composedPath().includes(tools.host);
+    // 用 ↑↓ 調整範圍後，滑鼠小幅晃動不會把選取範圍重設。
+    const adjust = (event, element) => { event.preventDefault(); lock = lastMouse; set(element); };
+    const set = element => { target = element; showBox(element); };
+    const finish = keepBox => {
+      picker = null;
+      document.documentElement.classList.remove('nt-picking');
+      document.removeEventListener('mousemove', onMove, true);
+      document.removeEventListener('keydown', onKey, true);
+      for (const type of POINTER_EVENTS) document.removeEventListener(type, onPointer, true);
+      tools.pickBar.hidden = true;
+      if (!keepBox) hideBox();
+    };
+    function onMove(e) {
+      if (fromUi(e)) return;
+      lastMouse = { x: e.clientX, y: e.clientY };
+      if (lock && Math.hypot(lastMouse.x - lock.x, lastMouse.y - lock.y) < 24) return;
+      lock = null;
+      const hit = document.elementFromPoint(e.clientX, e.clientY);
+      if (!hit || hit === document.documentElement) return;
+      const block = N.blockOf(hit);
+      if (block !== target) { parents = []; set(block); }
+    }
+    function onPointer(e) {
+      if (fromUi(e)) return;
+      e.preventDefault(); e.stopPropagation();
+      if (e.type === 'click' && target) { const element = target; finish(true); startSummary({ kind: 'element', element, paragraphs: () => paragraphsOf(element) }); }
+    }
+    function onKey(e) {
+      if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); finish(false); return; }
+      if (e.key === 'ArrowUp' && target?.parentElement && target.parentElement !== document.documentElement) { parents.push(target); adjust(e, target.parentElement); }
+      else if (e.key === 'ArrowDown' && parents.length) adjust(e, parents.pop());
+    }
+    const whole = N.el('button', '摘要整頁');
+    const cancel = N.el('button', '取消');
+    whole.onclick = () => { finish(false); startSummary({ kind: 'page', paragraphs: () => paragraphsOf(defaultRoot()) }); };
+    cancel.onclick = () => finish(false);
+    tools.pickBar.replaceChildren(N.el('span', '點選要摘要的區塊（↑ 放大範圍、↓ 縮小、Esc 取消）'), whole, cancel);
+    tools.pickBar.hidden = false;
+    document.documentElement.classList.add('nt-picking');
+    document.addEventListener('mousemove', onMove, true);
+    document.addEventListener('keydown', onKey, true);
+    for (const type of POINTER_EVENTS) document.addEventListener(type, onPointer, true);
+    picker = { cancel: () => finish(false) };
+  }
+  function summarizeSelection(text) {
+    picker?.cancel();
+    const value = text || String(getSelection() || '');
+    startSummary({ kind: 'selection', paragraphs: () => value.split(/\n+/).map(line => line.replace(/\s+/g, ' ').trim()).filter(Boolean) });
+  }
   function cancelSummary() {
     summaryJob?.ctrl.abort(); summaryJob = null;
     N.ui().summary.hidden = true;
+    hideBox();
   }
-  function summarize() {
+  function startSummary(source) {
     summaryJob?.ctrl.abort();
     const ctrl = new AbortController();
-    const job = { ctrl, getTranslator: N.translatorPool(ctrl.signal) };
+    const job = { ctrl, source, getTranslator: N.translatorPool(ctrl.signal) };
     summaryJob = job;
     const tools = N.ui();
     tools.summary.hidden = false; tools.copy.disabled = true; tools.retry.hidden = true; tools.notice.textContent = '';
+    tools.reselect.hidden = source.kind === 'selection';
+    if (source.kind !== 'element') hideBox();
     tools.body.replaceChildren(N.el('p', '正在讀取原文…'));
     tools.close.onclick = cancelSummary;
-    tools.retry.onclick = summarize;
+    tools.retry.onclick = () => startSummary(source);
+    tools.reselect.onclick = pickSummary;
     tools.close.focus({ preventScroll: true });
     void runSummary(job);
+  }
+
+  // ---- Translate selected text (context menu / shortcut) ----
+  let selectionCtrl = null;
+  async function translateSelection(text) {
+    const value = String(text || getSelection() || '').replace(/\s+/g, ' ').trim();
+    const tools = N.ui();
+    selectionCtrl?.abort();
+    const ctrl = selectionCtrl = new AbortController();
+    const close = () => { ctrl.abort(); tools.status('selection', ''); };
+    if (!value) { tools.status('selection', '請先選取要翻譯的英文文字。', [['關閉', close]]); return; }
+    if (!N.detect(value)) { tools.status('selection', '選取內容不是英文，目前僅支援英文 → 繁中。', [['關閉', close]]); return; }
+    tools.status('selection', '翻譯中…', [['取消', close]]);
+    try {
+      const model = await N.translatorPool(ctrl.signal)('en');
+      const output = await N.translateText(model, 'en', value, ctrl.signal);
+      N.check(ctrl.signal);
+      tools.status('selection', output, [['複製', () => navigator.clipboard.writeText(output).catch(() => {})], ['關閉', close]]);
+    } catch (error) {
+      if (!ctrl.signal.aborted) tools.status('selection', `翻譯失敗：${error.message}`, [['關閉', close]]);
+    }
   }
   async function runSummary(job) {
     const signal = job.ctrl.signal;
@@ -327,9 +431,9 @@
     const destroy = () => { if (model && !destroyed) { destroyed = true; model.destroy(); } };
     const status = text => { N.check(signal); tools.body.replaceChildren(N.el('p', text)); };
     try {
-      const paragraphs = pageParagraphs();
+      const paragraphs = job.source.paragraphs();
       const text = paragraphs.join('\n\n');
-      if (text.length < 80) throw new Error('這個頁面的文字太少，無法產生摘要。');
+      if (text.length < 80) throw new Error(job.source.kind === 'page' ? '這個頁面的文字太少，無法產生摘要。' : '選取範圍的文字太少（至少約 80 字），請重新選取較大的區塊。');
       const source = 'en';
       if (!N.detect(text.slice(0, 1200))) throw new Error('目前摘要僅支援英文文章。');
       // Use a neutral supported context; a localized page title may not be supported.
@@ -414,7 +518,9 @@
   });
   window.addEventListener('pagehide', () => { stop(); cancelSummary(); });
   window.__nt = {
-    start, stop, toggle: () => current ? stop() : start(), isOn: () => Boolean(current), summarize,
+    start, stop, toggle: () => current ? stop() : start(), isOn: () => Boolean(current), isPicking: () => Boolean(picker),
+    // Long-running; return immediately so callers (executeScript) do not wait for a model download prompt.
+    pickSummary, summarizeSelection, translateSelection: text => { void translateSelection(text); },
     getStatus: () => ({ on: Boolean(current), phase: current?.phase || 'off', message: current?.message || '準備好閱讀此頁' }),
     capabilities: async () => ({
       translation: await N.availability('Translator', { sourceLanguage: 'en', targetLanguage: 'zh-Hant' }),

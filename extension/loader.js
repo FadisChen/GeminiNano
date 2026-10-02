@@ -15,8 +15,10 @@
     return ownText || [...el.children].every(child => N.isInline(child)) ? el : null;
   }
 
+  const busy = () => window.__nt?.isOn() || window.__nt?.isPicking();
+
   function place(text, anchor) {
-    if (window.__nt?.isOn()) return;
+    if (busy()) return;
     const tip = N.ui().tip;
     tip.textContent = text;
     tip.hidden = false;
@@ -35,7 +37,7 @@
     N.ui().tip.hidden = true;
   }
   async function show(block) {
-    if (window.__nt?.isOn() || !block.isConnected) return;
+    if (busy() || !block.isConnected) return;
     const text = block.innerText.replace(/\s+/g, ' ').trim();
     const lang = text.length >= 3 && text.length <= MAX_CHARS ? N.detect(text, block) : null;
     if (!lang) return;
@@ -56,7 +58,7 @@
   function onOver(e) {
     clearTimeout(timer);
     if (shown && !shown.contains(e.target)) hide();
-    if (shown || window.__nt?.isOn() || !(e.target instanceof Element)) return;
+    if (shown || busy() || !(e.target instanceof Element)) return;
     const block = blockOf(e.target);
     if (!block) { document.removeEventListener('mousemove', onMove); return; }
     pos = { x: e.clientX, y: e.clientY };

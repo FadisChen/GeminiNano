@@ -36,6 +36,8 @@
       header{display:flex;align-items:center;justify-content:space-between;gap:8px;padding:12px 16px;border-bottom:1px solid var(--line)}
       h2{font:600 16px/1.5 'Microsoft JhengHei',sans-serif;margin:0}.body{padding:12px 18px;overflow:auto;overflow-wrap:anywhere}.body p{margin:0 0 10px}.body ul,.body ol{padding-left:1.3em;margin:0 0 10px}.body ul ul,.body ol ol,.body ul ol,.body ol ul{margin:0}.body h3{font:600 14px/1.6 'Microsoft JhengHei',sans-serif;margin:0 0 6px}.body code{font-family:Consolas,monospace;font-size:.92em}.body li{margin:5px 0}
       footer{padding:10px 16px;border-top:1px solid var(--line);display:flex;gap:8px;align-items:center;flex-wrap:wrap}.notice{font-size:12px;color:var(--muted)}
+      .pickbox{position:fixed;border:2px solid #e5332a;background:#e5332a14;border-radius:3px;pointer-events:none;box-shadow:0 0 0 1px #ffffff99}
+      .pickbar{position:fixed;left:50%;top:12px;transform:translateX(-50%);width:max-content;max-width:calc(100vw - 24px);display:flex;gap:8px;align-items:center;flex-wrap:wrap;padding:8px 12px}
       .tip{position:absolute;max-width:min(420px,calc(100vw - 24px));max-height:40vh;overflow:auto;background:#193d30;color:#fff;padding:10px 14px;border-radius:9px;font:14px/1.6 'Microsoft JhengHei',sans-serif;white-space:pre-wrap;pointer-events:none;overflow-wrap:anywhere}
       @media(prefers-color-scheme:dark){:host{--bg:#202925;--ink:#ebeee7;--muted:#acb8ae;--line:#435048;--accent:#97c8ac;--soft:#303f36}}
       @media(max-width:420px){.dock,.summary{right:8px;max-width:calc(100vw - 16px)}.dock{bottom:8px}.summary{top:8px}}
@@ -52,14 +54,20 @@
     const foot = el('footer');
     const copy = el('button', '複製摘要');
     const retry = el('button', '重試');
+    const reselect = el('button', '重新選取');
     const notice = el('span', '', 'notice');
     notice.setAttribute('role', 'status');
-    foot.append(copy, retry, notice);
+    foot.append(copy, retry, reselect, notice);
     summary.append(head, body, foot);
     const tip = el('div', '', 'tip');
     tip.hidden = true;
     tip.setAttribute('role', 'tooltip');
-    shadow.append(style, dock, summary, tip);
+    const pickBox = el('div', '', 'pickbox');
+    pickBox.hidden = true;
+    const pickBar = el('div', '', 'card pickbar');
+    pickBar.hidden = true;
+    pickBar.setAttribute('role', 'status');
+    shadow.append(style, dock, summary, pickBox, pickBar, tip);
     document.documentElement.append(host);
     const cards = new Map();
     const status = (key, text, actions = []) => {
@@ -79,7 +87,7 @@
     };
     // Keep tools visible when the player enters fullscreen.
     document.addEventListener('fullscreenchange', () => (document.fullscreenElement || document.documentElement).append(host));
-    tools = { host, shadow, status, summary, close, body, copy, retry, notice, tip };
+    tools = { host, shadow, status, summary, close, body, copy, retry, reselect, notice, tip, pickBox, pickBar };
     return tools;
   }
 
@@ -216,13 +224,37 @@
     if (current) parts.push(current);
     return parts;
   }
+  // Persistent cache: stored in the extension's own IndexedDB, reached through the background worker.
+  let persistOn = true;
+  try {
+    chrome.storage.local.get({ persistCache: true }).then(values => { persistOn = values.persistCache !== false; }, () => {});
+    chrome.storage.onChanged.addListener((changes, area) => { if (area === 'local' && changes.persistCache) persistOn = changes.persistCache.newValue !== false; });
+  } catch { /* not running inside an extension */ }
+  function hashText(text) {
+    let h1 = 0xdeadbeef, h2 = 0x41c6ce57;
+    for (let i = 0; i < text.length; i++) {
+      const code = text.charCodeAt(i);
+      h1 = Math.imul(h1 ^ code, 2654435761); h2 = Math.imul(h2 ^ code, 1597334677);
+    }
+    h1 = Math.imul(h1 ^ (h1 >>> 16), 2246822507) ^ Math.imul(h2 ^ (h2 >>> 13), 3266489909);
+    h2 = Math.imul(h2 ^ (h2 >>> 16), 2246822507) ^ Math.imul(h1 ^ (h1 >>> 13), 3266489909);
+    return `${(4294967296 * (2097151 & h2) + (h1 >>> 0)).toString(36)}.${text.length}`;
+  }
+  async function persist(message) {
+    if (!persistOn || !globalThis.chrome?.runtime?.sendMessage) return undefined;
+    try { return await chrome.runtime.sendMessage(message); } catch { return undefined; }
+  }
   async function translateText(model, lang, text, signal) {
     const key = `${lang}\n${text}`;
     const hit = cacheGet(key);
     if (hit !== undefined) return hit;
+    const stored = await persist({ type: 'cache-get', key: hashText(key), src: key });
+    check(signal);
+    if (typeof stored?.out === 'string') { cacheSet(key, stored.out); return stored.out; }
     let output = '';
     for (const part of splitText(text, 1500)) { check(signal); output += await model.translate(part.trim(), { signal }); }
     cacheSet(key, output);
+    void persist({ type: 'cache-set', key: hashText(key), src: key, out: output });
     return output;
   }
 
@@ -299,5 +331,5 @@
     return blocks;
   }
 
-  globalThis.__nano = { el, detect, check, abortError, ui, availability, createModel, translatorPool, withAbort, SKIP, SKIP_BLOCK, isTinyFrame, isInline, blockOf, splitText, translateText, confirmLanguage, packParagraphs, parseMarkdown };
+  globalThis.__nano = { el, detect, check, abortError, ui, availability, createModel, translatorPool, withAbort, hashText, SKIP, SKIP_BLOCK, isTinyFrame, isInline, blockOf, splitText, translateText, confirmLanguage, packParagraphs, parseMarkdown };
 })();

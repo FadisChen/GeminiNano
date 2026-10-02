@@ -74,3 +74,19 @@ test('parseMarkdown: ordered list after bullet list starts a new list', () => {
   const blocks = N.parseMarkdown('- a\n1. b\n2) c');
   assert.deepEqual(blocks.map(b => [b.type, b.ordered, b.items.length]), [['list', false, 1], ['list', true, 2]]);
 });
+
+test('translateText uses and fills the persistent cache', async () => {
+  const sent = [];
+  globalThis.chrome = { runtime: { sendMessage: async message => {
+    sent.push(message);
+    return message.type === 'cache-get' && message.src.includes('stored text') ? { out: '已儲存' } : {};
+  } } };
+  const model = { translate: async () => '新譯文' };
+  const signal = new AbortController().signal;
+  assert.equal(await N.translateText(model, 'en', 'stored text for cache', signal), '已儲存');
+  assert.equal(await N.translateText(model, 'en', 'fresh text for cache', signal), '新譯文');
+  assert.deepEqual(sent.map(m => m.type), ['cache-get', 'cache-get', 'cache-set']);
+  assert.equal(sent[2].out, '新譯文');
+  assert.match(N.hashText('abc'), /^[a-z0-9]+\.3$/);
+  delete globalThis.chrome;
+});

@@ -1,0 +1,27 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Nano PDF 閱讀器</title>
+  <link rel="stylesheet" href="viewer.css">
+</head>
+<body>
+  <header class="bar" translate="no">
+    <strong>Nano PDF 閱讀器</strong>
+    <span id="file" class="file"></span>
+    <button id="open" type="button">開啟本機 PDF</button>
+    <input id="picker" type="file" accept="application/pdf,.pdf" hidden>
+    <button id="translate" type="button" disabled>翻譯</button>
+    <button id="summary" type="button" disabled>選取區塊並摘要</button>
+    <span id="status" role="status"></span>
+  </header>
+  <main id="doc">
+    <p class="empty" translate="no">拖曳 PDF 到此處，或按「開啟本機 PDF」。從網頁開啟的 PDF 會自動載入。</p>
+  </main>
+  <script src="runtime.js"></script>
+  <script src="content.js"></script>
+  <script src="pdftext.js"></script>
+  <script type="module" src="viewer.js"></script>
+</body>
+</html>

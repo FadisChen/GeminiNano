@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
   "name": "Nano翻譯官",
-  "version": "0.5.0",
-  "description": "透過 Chrome 本機翻譯模型閱讀英文網頁（全頁雙語翻譯、滑鼠停留翻譯、自動翻譯），並使用 Gemini Nano 產生繁中摘要。",
+  "version": "0.6.0",
+  "description": "透過 Chrome 本機翻譯模型閱讀英文網頁與 PDF（全頁雙語翻譯、滑鼠停留翻譯、自動翻譯），並使用 Gemini Nano 對選取的區塊產生繁中摘要。",
   "icons": {
     "16": "icons/icon-16.png",
     "32": "icons/icon-32.png",
@@ -30,14 +30,40 @@
         "loader.js"
       ],
       "run_at": "document_idle",
-      "all_frames": true
+      "all_frames": true,
+      "match_about_blank": true
     }
   ],
   "permissions": [
     "scripting",
-    "storage"
+    "storage",
+    "contextMenus"
   ],
   "host_permissions": [
     "<all_urls>"
-  ]
+  ],
+  "minimum_chrome_version": "138",
+  "commands": {
+    "toggle-translate": {
+      "suggested_key": {
+        "default": "Alt+T"
+      },
+      "description": "翻譯／還原此頁"
+    },
+    "pick-summary": {
+      "suggested_key": {
+        "default": "Alt+S"
+      },
+      "description": "選取區塊並摘要"
+    },
+    "translate-selection": {
+      "suggested_key": {
+        "default": "Alt+Shift+T"
+      },
+      "description": "翻譯選取文字"
+    }
+  },
+  "content_security_policy": {
+    "extension_pages": "script-src 'self' 'wasm-unsafe-eval'; object-src 'self'"
+  }
 }
