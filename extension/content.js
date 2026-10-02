@@ -2,7 +2,7 @@
   if (window.__nt) return;
   const N = window.__nano;
   const MAX_RUNNING = Math.max(2, Math.min(4, (navigator.hardwareConcurrency || 4) >> 1));
-  const MAX_CHUNKS = 10;
+  const MAX_CHUNKS = 10, PIVOT_MAX_CHARS = 20000;
   let current = null, summaryJob = null, keepOriginal = true, settingRevision = 0;
   const owned = new Set();
   const styles = N.el('style');
@@ -431,18 +431,36 @@
     const destroy = () => { if (model && !destroyed) { destroyed = true; model.destroy(); } };
     const status = text => { N.check(signal); tools.body.replaceChildren(N.el('p', text)); };
     try {
-      const paragraphs = job.source.paragraphs();
-      const text = paragraphs.join('\n\n');
+      let paragraphs = job.source.paragraphs();
+      let text = paragraphs.join('\n\n');
       if (text.length < 80) throw new Error(job.source.kind === 'page' ? '這個頁面的文字太少，無法產生摘要。' : '選取範圍的文字太少（至少約 80 字），請重新選取較大的區塊。');
-      const source = 'en';
-      if (!N.detect(text.slice(0, 1200))) throw new Error('目前摘要僅支援英文文章。');
+      const sample = text.slice(0, 1200);
+      const lang = N.detect(sample) ? 'en' : N.isChinese(sample) ? 'zh' : null;
+      if (!lang) throw new Error('目前摘要支援英文與中文文章。');
+      let source = lang;
       // Use a neutral supported context; a localized page title may not be supported.
       const context = 'Summarize the main points of this article.';
-      const base = { type: 'key-points', format: 'markdown', length: 'medium', expectedInputLanguages: [source], expectedContextLanguages: ['en'] };
-      const direct = { ...base, outputLanguage: 'zh-Hant' };
+      const baseFor = input => ({ type: 'key-points', format: 'markdown', length: 'medium', expectedInputLanguages: [input], expectedContextLanguages: ['en'] });
+      const direct = { ...baseFor(lang), outputLanguage: 'zh-Hant' };
       const available = await N.availability('Summarizer', direct);
       N.check(signal);
       const viaTranslator = available === 'unavailable';
+      if (viaTranslator && lang === 'zh') {
+        // The summarizer cannot read or write Chinese here: translate to English, summarize, then translate back.
+        status('正在將文章轉成英文…');
+        const hant = /^zh-(tw|hk|hant)/i.test(document.documentElement.lang);
+        const toEnglish = await job.getTranslator(hant ? 'zh-Hant' : 'zh', 'en');
+        const translated = [];
+        let length = 0;
+        for (const paragraph of paragraphs) {
+          if (length > PIVOT_MAX_CHARS) { tools.notice.textContent = '內容過長，僅摘要文章前段'; break; }
+          translated.push(await N.translateText(toEnglish, 'zh>en', paragraph, signal));
+          N.check(signal);
+          length += paragraph.length;
+        }
+        paragraphs = translated; text = paragraphs.join('\n\n'); source = 'en';
+      }
+      const base = baseFor(source);
       const options = viaTranslator ? { ...base, outputLanguage: source } : direct;
       status('正在準備摘要模型…');
       model = await N.createModel('Summarizer', options, signal, '文章摘要');

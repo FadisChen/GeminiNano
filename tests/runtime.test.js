@@ -90,3 +90,11 @@ test('translateText uses and fills the persistent cache', async () => {
   assert.match(N.hashText('abc'), /^[a-z0-9]+\.3$/);
   delete globalThis.chrome;
 });
+
+test('isChinese: Chinese prose yes, English and Japanese no', () => {
+  assert.equal(N.isChinese('這是一段用來測試的繁體中文文章，內容包含許多字。'), true);
+  assert.equal(N.isChinese('这是一段简体中文文章。'), true);
+  assert.equal(N.isChinese('Hello world, this is English.'), false);
+  assert.equal(N.isChinese('これは日本語の文章です。漢字もあります'), false);
+  assert.equal(N.isChinese('12345'), false);
+});

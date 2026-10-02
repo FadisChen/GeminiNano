@@ -16,6 +16,12 @@
     return letters.length >= 3 && (text.match(/[a-z]/gi) || []).length / letters.length > .8 ? 'en' : null;
   }
 
+  // Chinese article text (no kana), used for summaries.
+  function isChinese(text) {
+    const letters = text.match(/\p{L}/gu) || [];
+    return letters.length >= 3 && !/[぀-ヿ]/u.test(text) && (text.match(/\p{Script=Han}/gu) || []).length / letters.length > .5;
+  }
+
   let tools;
   function ui() {
     if (tools) return tools;
@@ -167,19 +173,21 @@
       for (const model of models) model.destroy();
       models.clear(); pending.clear();
     }, { once: true });
-    return function get(source) {
+    const names = { en: '英文', zh: '中文', 'zh-Hant': '繁中' };
+    return function get(source, target = 'zh-Hant') {
       check(signal);
-      if (!pending.has(source)) {
-        pending.set(source, (async () => {
+      const key = `${source}>${target}`;
+      if (!pending.has(key)) {
+        pending.set(key, (async () => {
           try {
-            const model = await createModel('Translator', { sourceLanguage: source, targetLanguage: 'zh-Hant' }, signal, '英文 → 繁中');
+            const model = await createModel('Translator', { sourceLanguage: source, targetLanguage: target }, signal, `${names[source]} → ${names[target]}`);
             if (signal.aborted) { model.destroy(); throw abortError(); }
             models.add(model);
             return model;
-          } catch (error) { pending.delete(source); throw error; }
+          } catch (error) { pending.delete(key); throw error; }
         })());
       }
-      return pending.get(source);
+      return pending.get(key);
     };
   }
   // ---- DOM helpers shared by page translation and hover translation ----
@@ -331,5 +339,5 @@
     return blocks;
   }
 
-  globalThis.__nano = { el, detect, check, abortError, ui, availability, createModel, translatorPool, withAbort, hashText, SKIP, SKIP_BLOCK, isTinyFrame, isInline, blockOf, splitText, translateText, confirmLanguage, packParagraphs, parseMarkdown };
+  globalThis.__nano = { el, detect, isChinese, check, abortError, ui, availability, createModel, translatorPool, withAbort, hashText, SKIP, SKIP_BLOCK, isTinyFrame, isInline, blockOf, splitText, translateText, confirmLanguage, packParagraphs, parseMarkdown };
 })();
