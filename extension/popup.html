@@ -9,10 +9,11 @@
 <body>
   <main>
     <section class="reading" aria-label="此頁閱讀工具">
-      <p class="eyebrow">此頁閱讀 <span>EN / JA → 繁中</span></p>
+      <p class="eyebrow">此頁閱讀 <span>英文 → 繁中</span></p>
       <p id="pageStatus" role="status">正在檢查此頁…</p>
       <button id="toggle" class="btn primary" type="button" disabled><span id="toggleLabel">翻譯此頁</span><span aria-hidden="true">↗</span></button>
-      <button id="summary" class="btn secondary" type="button" disabled><span>產生重點摘要</span><span aria-hidden="true">≡</span></button>
+      <button id="summary" class="btn secondary" type="button" disabled><span>選取區塊並摘要</span><span aria-hidden="true">≡</span></button>
+      <p id="pdfNote" class="hint" hidden>此頁為 PDF。Chrome 內建檢視器無法直接翻譯，請改用 Nano PDF 閱讀器開啟。</p>
       <div class="capabilities"><span id="translationState">翻譯 · 檢查中</span><span id="summaryState">摘要 · 檢查中</span></div>
     </section>
     <fieldset class="mode" disabled id="modeField">
@@ -25,8 +26,11 @@
     </fieldset>
     <section class="preferences" aria-label="自動化設定">
       <label class="row" for="hover"><span><strong>滑鼠停留翻譯</strong><small>未翻譯此頁時，指向文字區塊彈出譯文</small></span><span class="switch"><input type="checkbox" id="hover" disabled><span class="slider"></span></span></label>
-      <label class="row" for="auto"><span><strong>自動翻譯新頁面</strong><small>載入英文、日文頁面時啟動</small></span><span class="switch"><input type="checkbox" id="auto" disabled><span class="slider"></span></span></label>
+      <label class="row" for="auto"><span><strong>自動翻譯新頁面</strong><small>載入英文頁面時啟動</small></span><span class="switch"><input type="checkbox" id="auto" disabled><span class="slider"></span></span></label>
+      <label class="row" for="persist"><span><strong>儲存翻譯結果</strong><small>重訪頁面時直接使用，資料只存在本機</small></span><span class="switch"><input type="checkbox" id="persist" disabled><span class="slider"></span></span></label>
+      <div class="row" id="cacheRow"><span><strong>清除翻譯快取</strong><small id="cacheCount">已儲存 — 筆</small></span><button id="clearCache" class="mini" type="button">清除</button></div>
     </section>
+    <p class="hint shortcuts">快捷鍵：Alt+T 翻譯／還原 · Alt+S 選取區塊摘要 · Alt+Shift+T 翻譯選取文字<br>也可在網頁上按右鍵使用；快捷鍵可至 chrome://extensions/shortcuts 修改。<br><a href="viewer.html" target="_blank">開啟 PDF 閱讀器</a></p>
     <p id="msg" class="msg" role="alert" hidden></p>
   </main>
   <script src="popup.js"></script>

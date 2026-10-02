@@ -50,6 +50,10 @@ main { padding: 0 20px; }
 .switch input:checked + .slider { background: var(--accent); }
 .switch input:checked + .slider::after { transform: translateX(14px); }
 .msg { font-size: 12px; padding: 10px; border-radius: 8px; background: var(--error-bg); color: var(--error); overflow-wrap: anywhere; }
+.mini { border: 1px solid var(--border); background: transparent; color: var(--text); border-radius: 7px; padding: 4px 10px; }
+.mini:hover:not(:disabled) { background: var(--card); }
+.shortcuts { margin: 12px 0 14px; line-height: 1.7; }
+.shortcuts a { color: var(--accent); }
 footer { display: flex; gap: 8px; padding: 12px 20px 18px; color: var(--muted); font-size: 10px; border-top: 1px solid var(--border); margin-top: 2px; }
 footer p { margin: 0; }
 footer p span { font-size: 9px; }

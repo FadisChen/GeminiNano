@@ -11,11 +11,15 @@
   };
   function detect(text, element) {
     const hint = element?.closest('[lang]')?.lang?.toLowerCase();
-    if (hint?.startsWith('zh') && !/[぀-ヿ]/u.test(text)) return null;
-    if (/[぀-ヿ]/u.test(text) || (hint?.startsWith('ja') && /[一-鿿]/u.test(text))) return 'ja';
-    if (hint && !/^(en|ja)(-|$)/.test(hint)) return null;
+    if (hint && !/^en(-|$)/.test(hint)) return null;
     const letters = text.match(/\p{L}/gu) || [];
     return letters.length >= 3 && (text.match(/[a-z]/gi) || []).length / letters.length > .8 ? 'en' : null;
+  }
+
+  // Chinese article text (no kana), used for summaries.
+  function isChinese(text) {
+    const letters = text.match(/\p{L}/gu) || [];
+    return letters.length >= 3 && !/[぀-ヿ]/u.test(text) && (text.match(/\p{Script=Han}/gu) || []).length / letters.length > .5;
   }
 
   let tools;
@@ -36,8 +40,10 @@
       .actions{display:flex;gap:8px;margin-top:9px;flex-wrap:wrap}.label{font-size:11px;letter-spacing:.12em;color:var(--muted);margin-bottom:5px}
       .summary{position:absolute;right:16px;top:16px;width:380px;max-width:calc(100vw - 32px);max-height:calc(55vh - 40px);display:flex;flex-direction:column;padding:0}
       header{display:flex;align-items:center;justify-content:space-between;gap:8px;padding:12px 16px;border-bottom:1px solid var(--line)}
-      h2{font:600 16px/1.5 'Microsoft JhengHei',sans-serif;margin:0}.body{padding:12px 18px;overflow:auto;overflow-wrap:anywhere}.body p{margin:0 0 10px}.body ul,.body ol{padding-left:1.3em;margin:0 0 10px}.body li{margin:5px 0}
+      h2{font:600 16px/1.5 'Microsoft JhengHei',sans-serif;margin:0}.body{padding:12px 18px;overflow:auto;overflow-wrap:anywhere}.body p{margin:0 0 10px}.body ul,.body ol{padding-left:1.3em;margin:0 0 10px}.body ul ul,.body ol ol,.body ul ol,.body ol ul{margin:0}.body h3{font:600 14px/1.6 'Microsoft JhengHei',sans-serif;margin:0 0 6px}.body code{font-family:Consolas,monospace;font-size:.92em}.body li{margin:5px 0}
       footer{padding:10px 16px;border-top:1px solid var(--line);display:flex;gap:8px;align-items:center;flex-wrap:wrap}.notice{font-size:12px;color:var(--muted)}
+      .pickbox{position:fixed;border:2px solid #e5332a;background:#e5332a14;border-radius:3px;pointer-events:none;box-shadow:0 0 0 1px #ffffff99}
+      .pickbar{position:fixed;left:50%;top:12px;transform:translateX(-50%);width:max-content;max-width:calc(100vw - 24px);display:flex;gap:8px;align-items:center;flex-wrap:wrap;padding:8px 12px}
       .tip{position:absolute;max-width:min(420px,calc(100vw - 24px));max-height:40vh;overflow:auto;background:#193d30;color:#fff;padding:10px 14px;border-radius:9px;font:14px/1.6 'Microsoft JhengHei',sans-serif;white-space:pre-wrap;pointer-events:none;overflow-wrap:anywhere}
       @media(prefers-color-scheme:dark){:host{--bg:#202925;--ink:#ebeee7;--muted:#acb8ae;--line:#435048;--accent:#97c8ac;--soft:#303f36}}
       @media(max-width:420px){.dock,.summary{right:8px;max-width:calc(100vw - 16px)}.dock{bottom:8px}.summary{top:8px}}
@@ -54,14 +60,20 @@
     const foot = el('footer');
     const copy = el('button', '複製摘要');
     const retry = el('button', '重試');
+    const reselect = el('button', '重新選取');
     const notice = el('span', '', 'notice');
     notice.setAttribute('role', 'status');
-    foot.append(copy, retry, notice);
+    foot.append(copy, retry, reselect, notice);
     summary.append(head, body, foot);
     const tip = el('div', '', 'tip');
     tip.hidden = true;
     tip.setAttribute('role', 'tooltip');
-    shadow.append(style, dock, summary, tip);
+    const pickBox = el('div', '', 'pickbox');
+    pickBox.hidden = true;
+    const pickBar = el('div', '', 'card pickbar');
+    pickBar.hidden = true;
+    pickBar.setAttribute('role', 'status');
+    shadow.append(style, dock, summary, pickBox, pickBar, tip);
     document.documentElement.append(host);
     const cards = new Map();
     const status = (key, text, actions = []) => {
@@ -81,7 +93,7 @@
     };
     // Keep tools visible when the player enters fullscreen.
     document.addEventListener('fullscreenchange', () => (document.fullscreenElement || document.documentElement).append(host));
-    tools = { host, shadow, status, summary, close, body, copy, retry, notice, tip };
+    tools = { host, shadow, status, summary, close, body, copy, retry, reselect, notice, tip, pickBox, pickBar };
     return tools;
   }
 
@@ -161,20 +173,171 @@
       for (const model of models) model.destroy();
       models.clear(); pending.clear();
     }, { once: true });
-    return function get(source) {
+    const names = { en: '英文', zh: '中文', 'zh-Hant': '繁中' };
+    return function get(source, target = 'zh-Hant') {
       check(signal);
-      if (!pending.has(source)) {
-        pending.set(source, (async () => {
+      const key = `${source}>${target}`;
+      if (!pending.has(key)) {
+        pending.set(key, (async () => {
           try {
-            const model = await createModel('Translator', { sourceLanguage: source, targetLanguage: 'zh-Hant' }, signal, `${source === 'ja' ? '日文' : '英文'} → 繁中`);
+            const model = await createModel('Translator', { sourceLanguage: source, targetLanguage: target }, signal, `${names[source]} → ${names[target]}`);
             if (signal.aborted) { model.destroy(); throw abortError(); }
             models.add(model);
             return model;
-          } catch (error) { pending.delete(source); throw error; }
+          } catch (error) { pending.delete(key); throw error; }
         })());
       }
-      return pending.get(source);
+      return pending.get(key);
     };
   }
-  globalThis.__nano = { el, detect, check, abortError, ui, availability, createModel, translatorPool, withAbort };
+  // ---- DOM helpers shared by page translation and hover translation ----
+  const SKIP = 'script,style,noscript,textarea,select,input,svg,math,pre,[translate="no"],[data-nano-tools],.nt-translated,.ytp-caption-window-container,[contenteditable]:not([contenteditable="false"])';
+  const SKIP_BLOCK = `${SKIP},code`;
+  const isTinyFrame = () => window !== window.top && (innerWidth < 240 || innerHeight < 160);
+  function isInline(element, memo) {
+    let value = memo?.get(element);
+    if (value === undefined) {
+      value = /^(inline|contents|ruby)/.test(getComputedStyle(element).display);
+      memo?.set(element, value);
+    }
+    return value;
+  }
+  // Nearest ancestor (or self) that starts its own text block; falls back to <body>.
+  function blockOf(element, memo) {
+    while (element && element !== document.body && element !== document.documentElement && isInline(element, memo)) element = element.parentElement;
+    return !element || element === document.documentElement ? document.body : element;
+  }
+
+  // ---- Translation cache (LRU) and long-text handling ----
+  const cache = new Map(), CACHE_MAX = 800;
+  const cacheGet = key => {
+    if (!cache.has(key)) return undefined;
+    const value = cache.get(key);
+    cache.delete(key); cache.set(key, value);
+    return value;
+  };
+  const cacheSet = (key, value) => {
+    cache.set(key, value);
+    if (cache.size > CACHE_MAX) cache.delete(cache.keys().next().value);
+  };
+  function splitText(text, max) {
+    if (text.length <= max) return [text];
+    const parts = [];
+    let current = '';
+    for (const sentence of text.match(/[^.!?。！？]*[.!?。！？]+\s*|[^.!?。！？]+$/g) || [text]) {
+      if (current && current.length + sentence.length > max) { parts.push(current); current = ''; }
+      if (sentence.length > max) { for (let i = 0; i < sentence.length; i += max) parts.push(sentence.slice(i, i + max)); continue; }
+      current += sentence;
+    }
+    if (current) parts.push(current);
+    return parts;
+  }
+  // Persistent cache: stored in the extension's own IndexedDB, reached through the background worker.
+  let persistOn = true;
+  try {
+    chrome.storage.local.get({ persistCache: true }).then(values => { persistOn = values.persistCache !== false; }, () => {});
+    chrome.storage.onChanged.addListener((changes, area) => { if (area === 'local' && changes.persistCache) persistOn = changes.persistCache.newValue !== false; });
+  } catch { /* not running inside an extension */ }
+  function hashText(text) {
+    let h1 = 0xdeadbeef, h2 = 0x41c6ce57;
+    for (let i = 0; i < text.length; i++) {
+      const code = text.charCodeAt(i);
+      h1 = Math.imul(h1 ^ code, 2654435761); h2 = Math.imul(h2 ^ code, 1597334677);
+    }
+    h1 = Math.imul(h1 ^ (h1 >>> 16), 2246822507) ^ Math.imul(h2 ^ (h2 >>> 13), 3266489909);
+    h2 = Math.imul(h2 ^ (h2 >>> 16), 2246822507) ^ Math.imul(h1 ^ (h1 >>> 13), 3266489909);
+    return `${(4294967296 * (2097151 & h2) + (h1 >>> 0)).toString(36)}.${text.length}`;
+  }
+  async function persist(message) {
+    if (!persistOn || !globalThis.chrome?.runtime?.sendMessage) return undefined;
+    try { return await chrome.runtime.sendMessage(message); } catch { return undefined; }
+  }
+  async function translateText(model, lang, text, signal) {
+    const key = `${lang}\n${text}`;
+    const hit = cacheGet(key);
+    if (hit !== undefined) return hit;
+    const stored = await persist({ type: 'cache-get', key: hashText(key), src: key });
+    check(signal);
+    if (typeof stored?.out === 'string') { cacheSet(key, stored.out); return stored.out; }
+    let output = '';
+    for (const part of splitText(text, 1500)) { check(signal); output += await model.translate(part.trim(), { signal }); }
+    cacheSet(key, output);
+    void persist({ type: 'cache-set', key: hashText(key), src: key, out: output });
+    return output;
+  }
+
+  // Heuristic detection cannot tell English from other Latin-script languages, so
+  // double-check longer English candidates with the on-device LanguageDetector.
+  let detectorPromise;
+  const languageDetector = () => detectorPromise ??= (async () => {
+    if (!globalThis.LanguageDetector) return null;
+    try { return await LanguageDetector.availability() === 'available' ? await LanguageDetector.create() : null; }
+    catch { return null; }
+  })();
+  async function confirmLanguage(text, lang, element) {
+    if (lang !== 'en' || text.length < 24) return true;
+    if (element?.closest?.('[lang]')?.lang?.toLowerCase().startsWith('en')) return true;
+    const detector = await languageDetector();
+    if (!detector) return true;
+    try {
+      const [top] = await detector.detect(text.slice(0, 500));
+      return !(top && top.detectedLanguage !== 'en' && top.confidence > .7);
+    } catch { return true; }
+  }
+
+  // ---- Summary helpers ----
+  // Greedily pack paragraphs into chunks of at most `budget` characters.
+  function packParagraphs(paragraphs, budget) {
+    const chunks = [];
+    let current = '';
+    const flush = () => { if (current) chunks.push(current); current = ''; };
+    for (const paragraph of paragraphs) {
+      for (const piece of splitText(paragraph, budget)) {
+        if (current && current.length + piece.length + 2 > budget) flush();
+        current += current ? `\n\n${piece}` : piece;
+      }
+    }
+    flush();
+    return chunks;
+  }
+  function parseInline(text) {
+    const parts = [];
+    let last = 0;
+    for (const match of text.matchAll(/\*\*(.+?)\*\*|`([^`]+)`|\*([^*\s][^*]*?)\*/g)) {
+      if (match.index > last) parts.push({ t: 'text', v: text.slice(last, match.index) });
+      parts.push(match[1] !== undefined ? { t: 'b', v: match[1] } : match[2] !== undefined ? { t: 'code', v: match[2] } : { t: 'i', v: match[3] });
+      last = match.index + match[0].length;
+    }
+    if (last < text.length) parts.push({ t: 'text', v: text.slice(last) });
+    return parts;
+  }
+  // Minimal Markdown (headings, nested lists, bold/italic/code) into a plain data tree.
+  function parseMarkdown(text) {
+    const blocks = [], stack = [];
+    const open = (ordered, indent) => {
+      const list = { type: 'list', ordered, items: [] };
+      const parent = stack.at(-1);
+      if (parent) parent.list.items.at(-1).children.push(list); else blocks.push(list);
+      stack.push({ indent, list });
+    };
+    for (const raw of text.split('\n')) {
+      if (!raw.trim()) continue;
+      const item = raw.match(/^([ \t]*)([-*•]|\d+[.)])\s+(.*)$/);
+      if (item) {
+        const indent = item[1].replace(/\t/g, '    ').length, ordered = /\d/.test(item[2]);
+        while (stack.length && indent < stack.at(-1).indent) stack.pop();
+        const top = stack.at(-1);
+        if (!top || indent > top.indent) open(ordered, indent);
+        else if (top.list.ordered !== ordered) { stack.pop(); open(ordered, indent); }
+        stack.at(-1).list.items.push({ inline: parseInline(item[3]), children: [] });
+        continue;
+      }
+      stack.length = 0;
+      const heading = raw.trim().match(/^#{1,6}\s+(.*)$/);
+      blocks.push({ type: heading ? 'h' : 'p', inline: parseInline(heading ? heading[1] : raw.trim()) });
+    }
+    return blocks;
+  }
+
+  globalThis.__nano = { el, detect, isChinese, check, abortError, ui, availability, createModel, translatorPool, withAbort, hashText, SKIP, SKIP_BLOCK, isTinyFrame, isInline, blockOf, splitText, translateText, confirmLanguage, packParagraphs, parseMarkdown };
 })();

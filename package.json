@@ -1,0 +1,8 @@
+{
+  "name": "nano-translator",
+  "private": true,
+  "description": "Nano翻譯官 Chrome extension",
+  "scripts": {
+    "test": "node --test \"tests/*.test.js\""
+  }
+}
